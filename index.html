@@ -83,6 +83,24 @@
   .hidden{display:none !important;}
   .hint{font-size:11.5px; color:var(--text-muted); margin-top:4px;}
   .drag-over{outline:2px dashed var(--border-strong); outline-offset:-2px;}
+  /* 저장 실패 경고 배너 */
+  #alertBanner{
+    position:sticky; top:0; z-index:50;
+    background:var(--danger-bg); border:2px solid var(--danger-border); border-radius:var(--radius);
+    padding:14px 16px; margin-bottom:14px; box-shadow:0 3px 12px rgba(224,32,26,0.20);
+  }
+  #alertBanner .ab-title{font-size:15px; font-weight:700; color:var(--danger-text); margin-bottom:6px;}
+  #alertBanner .ab-body{font-size:13.5px; line-height:1.7; color:var(--text);}
+  #alertBanner .ab-body b{color:var(--danger-text);}
+  #alertBanner .ab-detail{
+    margin-top:8px; font-size:11.5px; color:var(--text-secondary);
+    font-family:ui-monospace,Consolas,'D2Coding',monospace;
+    background:rgba(255,255,255,0.75); border:1px solid var(--border); border-radius:6px;
+    padding:6px 8px; word-break:break-all;
+  }
+  #alertBanner .ab-actions{display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;}
+  .save-status.ok{color:#1b7f3b;}
+  .save-status.warn{color:#b26a00; font-weight:700;}
 </style>
 </head>
 <body>
@@ -92,6 +110,8 @@
     <span class="date" id="todayDate"></span>
   </div>
   <div class="subline" id="subline"></div>
+
+  <div id="alertBanner" class="hidden"></div>
 
   <div class="toolbar">
     <div class="left" id="toolbarLeft"></div>
@@ -262,6 +282,10 @@ let redoStack = [];
 let saveTimer = null;
 let dragRowIndex = null;
 let dragCarrierId = null;
+let loadOk = false;     // 시트에서 현재 공지를 정상적으로 불러왔는가 (실패 시 편집 잠금)
+let dirty = false;      // 서버에 저장되지 않은 수정이 있는가
+let typing = false;     // 셀에 타이핑 중이나 아직 blur(확정) 안 된 상태
+const MAX_RETRY = 3;
 
 try {
   const savedSession = sessionStorage.getItem('jeobsu_session');
@@ -271,8 +295,9 @@ try {
 /* =========================================================
    유틸
    ========================================================= */
-function isEdit(){ return session.role === 'edit' || session.role === 'super'; }
-function isSuper(){ return session.role === 'super'; }
+// 불러오기에 실패했으면(loadOk=false) 어떤 경우에도 편집 UI를 켜지 않는다.
+function isEdit(){ return loadOk && (session.role === 'edit' || session.role === 'super'); }
+function isSuper(){ return loadOk && session.role === 'super'; }
 
 function relativeTime(iso){
   if(!iso) return '-';
@@ -327,63 +352,197 @@ function touch(carrierId){
 /* =========================================================
    구글시트 연동
    ========================================================= */
-function setSaveStatus(text, isErr){
+function setSaveStatus(text, kind){
+  // kind: undefined | 'ok' | 'warn' | 'err'
   const el = document.getElementById('saveStatus');
   el.textContent = text;
-  el.className = 'save-status' + (isErr ? ' err' : '');
+  el.className = 'save-status' + (kind ? ' ' + kind : '');
 }
+
+function clockLabel(){
+  const d = new Date();
+  return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0') + ':' + String(d.getSeconds()).padStart(2,'0');
+}
+
+function isWhale(){ return /Whale/i.test(navigator.userAgent); }
 
 function scheduleSave(){
   renderHeader();
   renderSidebar();
+  if(!loadOk){ return; } // 불러오기 실패 상태에서는 절대 저장하지 않는다 (실제 공지 덮어쓰기 방지)
   if(!SHEET_URL){ setSaveStatus('저장됨 (브라우저 메모리, 새로고침시 초기화)'); return; }
-  setSaveStatus('저장 중…');
+  dirty = true;
+  setSaveStatus('저장 중…', 'warn');
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveToSheet, 700);
+  saveTimer = setTimeout(function(){ saveToSheet(0); }, 700);
 }
 
-async function saveToSheet(){
+/* ---------- 저장 실패 배너 ---------- */
+function showSaveBanner(code, detail){
+  const el = document.getElementById('alertBanner');
+  const browserIssue = (code === 'BLOCKED' || code === 'NOT_JSON' || code.indexOf('HTTP') === 0);
+  el.classList.remove('hidden');
+  el.innerHTML =
+    '<div class="ab-title">⚠ 수정 내용이 아직 저장되지 않았습니다</div>' +
+    '<div class="ab-body">' +
+      '화면에 보이는 수정 내용은 <b>내 브라우저 안에만</b> 있습니다. 지금 창을 닫거나 새로고침하면 그대로 사라집니다.' +
+      (browserIssue
+        ? '<br><b>크롬(Chrome)으로 이 페이지를 다시 열어서 수정하면 대부분 해결됩니다.</b>' +
+          (isWhale()
+            ? ' <span style="color:var(--text-secondary)">(지금 웨일 브라우저로 접속 중입니다. 웨일의 광고·트래커 차단 기능이 구글 서버 요청을 막는 경우가 있습니다.)</span>'
+            : ' <span style="color:var(--text-secondary)">(브라우저의 광고·트래커 차단 기능이나 확장프로그램이 원인일 수 있습니다.)</span>')
+        : '') +
+    '</div>' +
+    '<div class="ab-detail">오류 코드: ' + escapeHtml(code) + ' — ' + escapeHtml(detail) + '</div>' +
+    '<div class="ab-actions">' +
+      '<button class="primary" onclick="retrySaveNow()">지금 다시 저장 시도</button>' +
+      '<button onclick="hideSaveBanner()">경고 숨기기</button>' +
+    '</div>';
+}
+
+function hideSaveBanner(){
+  const el = document.getElementById('alertBanner');
+  el.classList.add('hidden');
+  el.innerHTML = '';
+}
+
+function retrySaveNow(){
+  clearTimeout(saveTimer);
+  saveToSheet(0);
+}
+
+/* ---------- 저장 (실패 원인 구분 + 자동 재시도) ---------- */
+function onSaveFailure(retry, code, detail, noRetry){
+  if(!noRetry && retry < MAX_RETRY){
+    const delays = [800, 2000, 5000];
+    const wait = delays[retry] || 5000;
+    setSaveStatus('저장 실패(' + code + ') · ' + Math.round(wait/1000) + '초 후 자동 재시도 ' + (retry+1) + '/' + MAX_RETRY, 'err');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){ saveToSheet(retry + 1); }, wait);
+    return;
+  }
+  setSaveStatus('저장 실패 (' + code + ') — 위 경고 확인', 'err');
+  showSaveBanner(code, detail);
+}
+
+async function saveToSheet(retry){
+  retry = retry || 0;
+  if(!SHEET_URL) return;
+
+  setSaveStatus(retry ? ('저장 재시도 중… (' + retry + '/' + MAX_RETRY + ')') : '저장 중…', 'warn');
+
+  let res, text;
   try{
-    const res = await fetch(SHEET_URL, {
+    res = await fetch(SHEET_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action:'save', token: session.token, state: state })
+      body: JSON.stringify({ action:'save', token: session.token, state: state }),
+      keepalive: true
     });
-    const data = await res.json();
-    if(data.ok){
-      setSaveStatus('저장됨 · ' + relativeTime(new Date().toISOString()));
-    } else if(data.needsAuth){
-      session = { token:null, role:null };
-      sessionStorage.removeItem('jeobsu_session');
-      setSaveStatus('세션이 만료되었습니다. 다시 로그인해주세요.', true);
-      renderToolbar(); renderSidebar(); renderTable();
-      if(!window.__authPromptOpen){
-        window.__authPromptOpen = true;
-        openAuthModal(()=>{ window.__authPromptOpen = false; saveToSheet(); }, false);
-      }
-    } else {
-      setSaveStatus('저장 실패: ' + (data.error||'알 수 없는 오류'), true);
-    }
   } catch(err){
-    setSaveStatus('저장 실패: 네트워크 오류', true);
+    // fetch 자체가 실패 = 브라우저 차단(광고/트래커 차단, 확장프로그램) 또는 CORS 리다이렉트 차단, 또는 진짜 네트워크 단절
+    return onSaveFailure(retry, 'BLOCKED',
+      '요청이 브라우저에서 차단되었거나 구글 서버에 닿지 못했습니다. (' + (err && err.message ? err.message : String(err)) + ')');
   }
+
+  try{
+    text = await res.text();
+  } catch(err){
+    return onSaveFailure(retry, 'READ_FAIL', '응답을 읽지 못했습니다. (' + (err && err.message ? err.message : String(err)) + ')');
+  }
+
+  if(!res.ok){
+    return onSaveFailure(retry, 'HTTP' + res.status,
+      '구글 서버가 HTTP ' + res.status + ' ' + (res.statusText || '') + ' 로 응답했습니다. 응답 앞부분: ' + text.slice(0,120).replace(/\s+/g,' '));
+  }
+
+  let data;
+  try{
+    data = JSON.parse(text);
+  } catch(err){
+    return onSaveFailure(retry, 'NOT_JSON',
+      'JSON이 아닌 응답이 돌아왔습니다(구글 로그인 페이지나 오류 페이지일 가능성). 응답 앞부분: ' + text.slice(0,150).replace(/\s+/g,' '));
+  }
+
+  if(data.ok){
+    dirty = false;
+    hideSaveBanner();
+    setSaveStatus('저장됨 · ' + clockLabel(), 'ok');
+    return;
+  }
+
+  if(data.needsAuth){
+    session = { token:null, role:null };
+    sessionStorage.removeItem('jeobsu_session');
+    setSaveStatus('세션 만료 — 다시 로그인하면 자동으로 저장됩니다.', 'err');
+    showSaveBanner('SESSION_EXPIRED', '로그인 세션이 만료되어 저장이 거부되었습니다. 다시 로그인하면 방금 수정 내용이 자동으로 저장됩니다.');
+    renderToolbar(); renderSidebar(); renderTable();
+    if(!window.__authPromptOpen){
+      window.__authPromptOpen = true;
+      openAuthModal(function(){ window.__authPromptOpen = false; saveToSheet(0); }, false);
+    }
+    return;
+  }
+
+  // 서버가 정상 응답했는데 ok:false → 재시도해도 같은 결과이므로 즉시 알림
+  onSaveFailure(retry, 'SERVER', data.error || '알 수 없는 서버 오류', true);
 }
 
 async function loadFromSheet(){
-  if(!SHEET_URL){ render(); return; }
+  if(!SHEET_URL){ loadOk = true; render(); return; }
+  let res, text;
   try{
-    const res = await fetch(SHEET_URL);
-    const data = await res.json();
-    if(data.ok && data.state){
-      state = data.state;
-      if(!state.carrierOrder || !state.carrierOrder.length){
-        state.carrierOrder = Object.keys(state.carriers||{});
-      }
-      currentCarrierId = state.carrierOrder[0];
-    }
+    res = await fetch(SHEET_URL);
+    text = await res.text();
   } catch(err){
-    setSaveStatus('불러오기 실패: 네트워크 오류. 초기값으로 표시합니다.', true);
+    return onLoadFailure('BLOCKED',
+      '요청이 브라우저에서 차단되었거나 구글 서버에 닿지 못했습니다. (' + (err && err.message ? err.message : String(err)) + ')');
   }
+  if(!res.ok){
+    return onLoadFailure('HTTP' + res.status,
+      '구글 서버가 HTTP ' + res.status + ' 로 응답했습니다. 응답 앞부분: ' + text.slice(0,120).replace(/\s+/g,' '));
+  }
+  let data;
+  try{
+    data = JSON.parse(text);
+  } catch(err){
+    return onLoadFailure('NOT_JSON',
+      'JSON이 아닌 응답이 돌아왔습니다(구글 로그인 페이지나 오류 페이지일 가능성). 응답 앞부분: ' + text.slice(0,150).replace(/\s+/g,' '));
+  }
+  if(!data.ok){
+    return onLoadFailure('SERVER', data.error || '알 수 없는 서버 오류');
+  }
+  if(data.state){
+    state = data.state;
+    if(!state.carrierOrder || !state.carrierOrder.length){
+      state.carrierOrder = Object.keys(state.carriers||{});
+    }
+    currentCarrierId = state.carrierOrder[0];
+  }
+  loadOk = true;
+  setSaveStatus('불러오기 완료 · ' + clockLabel(), 'ok');
+  render();
+}
+
+/* 불러오기가 실패했는데 그대로 편집하면, 화면의 "초기 샘플 데이터"가
+   실제 시트 내용을 통째로 덮어쓸 수 있다. 그래서 편집·저장을 아예 막는다. */
+function onLoadFailure(code, detail){
+  loadOk = false;
+  setSaveStatus('불러오기 실패 (' + code + ') — 편집 잠김', 'err');
+  const el = document.getElementById('alertBanner');
+  el.classList.remove('hidden');
+  el.innerHTML =
+    '<div class="ab-title">⚠ 현재 공지 내용을 불러오지 못했습니다 — 편집이 잠겼습니다</div>' +
+    '<div class="ab-body">' +
+      '지금 화면에 보이는 표는 <b>실제 공지가 아니라 초기 샘플 데이터</b>입니다. ' +
+      '이 상태에서 수정하면 실제 공지가 통째로 지워질 수 있어 편집을 막아두었습니다.' +
+      '<br><b>크롬(Chrome)으로 이 페이지를 다시 열어주세요.</b>' +
+      (isWhale() ? ' <span style="color:var(--text-secondary)">(지금 웨일 브라우저로 접속 중입니다. 웨일의 광고·트래커 차단 기능이 구글 서버 요청을 막는 경우가 있습니다.)</span>' : '') +
+    '</div>' +
+    '<div class="ab-detail">오류 코드: ' + escapeHtml(code) + ' — ' + escapeHtml(detail) + '</div>' +
+    '<div class="ab-actions">' +
+      '<button class="primary" onclick="location.reload()">새로고침해서 다시 시도</button>' +
+    '</div>';
   render();
 }
 
@@ -485,6 +644,10 @@ function renderToolbar(){
       ${isSuper() ? '<button class="small" onclick="openChangePwModal()">비밀번호 변경</button>' : ''}
       <button class="small" onclick="logout()">수정 종료</button>
     `;
+  } else if(!loadOk){
+    foot.classList.add('hidden');
+    legend.classList.add('hidden');
+    left.innerHTML = `<span class="hint">🔒 현재 공지를 불러오지 못해 편집이 잠겨 있습니다. 위 안내를 확인해주세요.</span>`;
   } else {
     foot.classList.add('hidden');
     legend.classList.add('hidden');
@@ -639,6 +802,7 @@ function renderTable(){
    편집 동작
    ========================================================= */
 function onCellEdit(rowIdx, colIdx, el){
+  typing = false;
   const carrier = state.carriers[currentCarrierId];
   const newVal = el.innerText.replace(/\n+$/,'');
   if(carrier.rows[rowIdx].cells[colIdx] === newVal) return;
@@ -648,6 +812,7 @@ function onCellEdit(rowIdx, colIdx, el){
 }
 
 function onHeaderEdit(colIdx, el){
+  typing = false;
   const carrier = state.carriers[currentCarrierId];
   const newVal = el.innerText.replace(/\n+$/,'');
   if(carrier.columns[colIdx] === newVal) return;
@@ -657,6 +822,7 @@ function onHeaderEdit(colIdx, el){
 }
 
 function onGroupCellEdit(rowIdx, el){
+  typing = false;
   const carrier = state.carriers[currentCarrierId];
   const newVal = el.innerText.replace(/\n+$/,'');
   const oldVal = carrier.rows[rowIdx].cells[0];
@@ -1002,6 +1168,42 @@ document.addEventListener('keydown', (e)=>{
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey){ e.preventDefault(); undo(); }
   if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='y' || (e.key.toLowerCase()==='z' && e.shiftKey))){ e.preventDefault(); redo(); }
 });
+
+/* =========================================================
+   저장 안 된 채로 창을 닫는 사고 방지
+   ========================================================= */
+
+// 셀에 타이핑을 시작하면 표시해둔다 (아직 blur 전이라 state에 반영되지 않은 상태)
+document.addEventListener('input', function(e){
+  if(e.target && e.target.isContentEditable) typing = true;
+});
+
+// 탭을 닫거나 새로고침할 때, 저장이 안 끝났으면 브라우저 경고를 띄운다
+window.addEventListener('beforeunload', function(e){
+  if(!SHEET_URL) return;
+  if(dirty || typing){
+    e.preventDefault();
+    e.returnValue = '';   // 크롬 계열은 브라우저 기본 문구를 표시
+    return '';
+  }
+});
+
+// 탭을 숨기거나 닫는 시점에 마지막으로 한 번 확실히 저장한다.
+//  - 편집 중이던 셀을 강제로 blur 시켜 값을 state에 확정시키고
+//  - 0.7초 디바운스를 기다리지 않고 즉시 전송한다 (keepalive)
+function flushSave(){
+  if(!SHEET_URL || !loadOk) return;
+  const ae = document.activeElement;
+  if(ae && ae.isContentEditable) ae.blur();   // → onCellEdit 등이 실행되어 state 확정
+  if(dirty && session.token){
+    clearTimeout(saveTimer);
+    saveToSheet(0);
+  }
+}
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'hidden') flushSave();
+});
+window.addEventListener('pagehide', flushSave);
 
 /* =========================================================
    초기 실행
