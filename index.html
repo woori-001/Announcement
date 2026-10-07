@@ -43,12 +43,15 @@
   .carrier-item .name{font-size:14px; font-weight:500;}
   .carrier-item.active .name{font-weight:700;}
   .carrier-item .time{font-size:11px; color:var(--text-muted); margin-top:2px;}
+  .carrier-item .time.unsaved{color:var(--danger-text); font-weight:700;}
   .sidebar-foot{padding:8px; border-top:1px solid var(--border);}
   .main{flex:1; min-width:0;}
   .toolbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;}
   .toolbar .left, .toolbar .right{display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
   .save-status{font-size:12px; color:var(--text-muted);}
-  .save-status.err{color:var(--danger-text);}
+  .save-status.err{color:var(--danger-text); font-weight:700;}
+  .save-status.ok{color:#1b7f3b;}
+  .save-status.warn{color:#b26a00; font-weight:700;}
   .content-row{display:block;}
   table.notice{width:100%; table-layout:fixed; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;}
   table.notice td{word-wrap:break-word; overflow-wrap:anywhere;}
@@ -74,6 +77,7 @@
   .legend span{font-size:11.5px; padding:3px 8px; border-radius:12px; background:var(--surface); border:1px solid var(--border); color:var(--text-secondary);}
   .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,0.35); display:flex; align-items:center; justify-content:center; z-index:100;}
   .modal{background:var(--surface); border-radius:12px; padding:20px 22px; width:420px; max-width:90vw; max-height:85vh; overflow:auto;}
+  .modal.wide{width:620px;}
   .modal h2{font-size:16px; margin:0 0 14px;}
   .modal-row{margin-bottom:12px;}
   .modal-row label{display:block; font-size:12.5px; color:var(--text-secondary); margin-bottom:4px;}
@@ -83,15 +87,19 @@
   .hidden{display:none !important;}
   .hint{font-size:11.5px; color:var(--text-muted); margin-top:4px;}
   .drag-over{outline:2px dashed var(--border-strong); outline-offset:-2px;}
-  /* 저장 실패 경고 배너 */
+
+  /* 경고 배너 (저장 실패 / 불러오기 실패 / 동시수정 충돌) */
   #alertBanner{
     position:sticky; top:0; z-index:50;
     background:var(--danger-bg); border:2px solid var(--danger-border); border-radius:var(--radius);
     padding:14px 16px; margin-bottom:14px; box-shadow:0 3px 12px rgba(224,32,26,0.20);
   }
+  #alertBanner.soft{background:var(--warn-bg); border-color:var(--warn-border); box-shadow:0 3px 12px rgba(233,201,58,0.25);}
   #alertBanner .ab-title{font-size:15px; font-weight:700; color:var(--danger-text); margin-bottom:6px;}
+  #alertBanner.soft .ab-title{color:#8a6100;}
   #alertBanner .ab-body{font-size:13.5px; line-height:1.7; color:var(--text);}
   #alertBanner .ab-body b{color:var(--danger-text);}
+  #alertBanner.soft .ab-body b{color:#8a6100;}
   #alertBanner .ab-detail{
     margin-top:8px; font-size:11.5px; color:var(--text-secondary);
     font-family:ui-monospace,Consolas,'D2Coding',monospace;
@@ -99,8 +107,18 @@
     padding:6px 8px; word-break:break-all;
   }
   #alertBanner .ab-actions{display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;}
-  .save-status.ok{color:#1b7f3b;}
-  .save-status.warn{color:#b26a00; font-weight:700;}
+
+  /* 기본 비밀번호 사용 중 알림 */
+  #pwNotice{
+    background:var(--warn-bg); border:1px solid var(--warn-border); border-radius:var(--radius);
+    padding:10px 14px; margin-bottom:12px; font-size:13px; color:#6b4e00;
+  }
+
+  /* 수정 이력 */
+  table.hist{width:100%; border-collapse:collapse; font-size:12.5px;}
+  table.hist th{text-align:left; background:#eef0f1; padding:6px 8px; border:1px solid var(--border); font-weight:700;}
+  table.hist td{padding:6px 8px; border:1px solid var(--border); vertical-align:middle;}
+  .badge{display:inline-block; font-size:11px; padding:2px 6px; border-radius:10px; border:1px solid var(--border-strong); background:#fafafa;}
 </style>
 </head>
 <body>
@@ -112,6 +130,7 @@
   <div class="subline" id="subline"></div>
 
   <div id="alertBanner" class="hidden"></div>
+  <div id="pwNotice" class="hidden"></div>
 
   <div class="toolbar">
     <div class="left" id="toolbarLeft"></div>
@@ -146,151 +165,53 @@
 
 <script>
 /* =========================================================
-   설정
+   설정 — Supabase
+   ---------------------------------------------------------
+   아래 두 값은 공개되어도 안전합니다(GitHub에 그대로 올려도 됨).
+   쓰기 권한은 키가 아니라 DB의 RLS + 서버 함수가 통제합니다.
+     · reception_carriers 테이블은 "읽기만" 허용되어 있고
+       INSERT/UPDATE/DELETE 권한 자체가 없습니다.
+     · 저장은 비밀번호로 발급받은 토큰을 검증하는
+       reception_save_carrier() 함수를 통해서만 가능합니다.
    ========================================================= */
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbzLXi8cm3KmvC8nye2ok4rjTCdG0lefLFRI3cj9ZkKUZ2vuSo2MIKJ17hTjpNeNFFgR/exec'; // Apps Script 배포 URL(.../exec)을 여기에 넣으면 연동 활성화. 비워두면 브라우저 메모리에만 저장.
+const SUPABASE_URL = 'https://omdyyvqkxxigilxjysbz.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_g41wwhIMN19UchPheU9Vvg_lAHjnZNf';
 
-/* =========================================================
-   기본 데이터 (구글시트 연동 전 초기값 / 연동 후에는 시트 값이 우선)
-   ========================================================= */
-function row(cells, hl){ return { cells: cells, hl: hl || 'none' }; }
-
-const defaultCarriers = {
-  kt: {
-    name: 'KT',
-    columns: ['유형','접점'],
-    rows: [
-      row(['온라인 접점','자점']),
-      row(['도매 접점','등록안된, 접점없는 접수건 = KT도매 접점']),
-      row(['접점등록업체 접수건','각 업체에 맞는 접점 사용필수\n예: 타임 접수건 > 타임 접점']),
-      row(['웨이브넷 접점','아이엔에스정보통신, 판매점'])
-    ],
-    note: { type:'danger', title:'접점 실수 절대 주의', body:'오접점으로 인증 예외 없음' },
-    updatedAt: new Date().toISOString()
-  },
-  sky: {
-    name: 'SKY',
-    columns: ['구분','상품','상부점'],
-    rows: [
-      row(['단독','인터넷','플라조']),
-      row(['단독','티비','우리정보']),
-      row(['인티번들(추단포함)','자점','우리정보']),
-      row(['인티번들(추단포함)','일반등급 100M/200M','우리정보']),
-      row(['인티번들(추단포함)','일반등급 500M','백메가'],'warn'),
-      row(['인티번들(추단포함)','일반등급 1G','백메가'],'warn'),
-      row(['인티번들(추단포함)','동판','우리정보']),
-      row(['인티번들(추단포함)','홈30%','우리정보'])
-    ],
-    note: { type:'warn', title:'스카이 접수처 공지', body:'500M/1G 번들은 백메가로 접수 부탁드립니다.\n인단독 건은 플라조로 접수 부탁드립니다.\n\n그 외의 티비 단독과 100M/200M 인+티 번들 및 자점 건은 우리정보로 접수 부탁드립니다.\n\n상부이관시 신분증or진위 파일 필수입니다\n(500이상 상품 후첨 불가)\n\n플라조이관시 고객님 성함뒤에 기존 통신사 꼭 기재 부탁드립니다!' },
-    updatedAt: new Date().toISOString()
-  },
-  skb: {
-    name: 'SKB',
-    columns: ['유형','SKB 상품','상부점'],
-    rows: [
-      row(['SKB도매','단독','시온(E03276)']),
-      row(['SKB도매','번들','시온(E03276)']),
-      row(['POP','POP 모든 상품','넷플러스(수도권:E04348),(지방:E04453)']),
-      row(['소매','수도권 - 경기,인천,서울,강원도','웨이브넷(E04569)']),
-      row(['소매','지방 - 대구,경북','넷플러스컴퍼니(디코비즈) / 코드 : E04453']),
-      row(['소매','지방 - 충청도,세종시,대전','넷플러스컴퍼니(디코비즈) / 코드 : E04585']),
-      row(['소매','지방 - 전라도,제주도','넷플러스컴퍼니(디코비즈) / 코드 : E02921']),
-      row(['소매','지방 - 전라도,제주도(소상공인)','넷플러스컴퍼니(디코비즈) / 코드 : E03867'],'danger'),
-      row(['오피스넷','지방 - 부산,울산,경남','넷플러스컴퍼니(디코비즈) / 코드 : E04453']),
-      row(['소호','전상품','한결']),
-      row(['소호','인단독','웨이브넷']),
-      row(['소호','인전번들','웨이브넷'])
-    ],
-    note: { type:'none', title:'', body:'' },
-    updatedAt: new Date().toISOString()
-  },
-  lg: {
-    name: 'LG',
-    columns: ['LG 상품유형','상부점'],
-    rows: [
-      row(['단독 100M,200M (동판시 광합성)','광합성'],'warn'),
-      row(['단독 500M (동판시 광합성)','광합성'],'warn'),
-      row(['단독 1G (동판시 광합성)','타임'],'warn'),
-      row(['인+TV 번들','타임 OR 광합성'],'warn')
-    ],
-    note: { type:'warn', title:'예외 대리점 안내', body:'시흥/천안영업, BCY, 보라넷워크, 주안통신, 더존은인터넷, 유아이통신, 세종통신, 아이오, 돈큐이노베이션, 돈마니인터넷, 한수위통신, 케이정보통신\n\n번들만 광합성 / 단독은 위 상부점대로' },
-    updatedAt: new Date().toISOString()
-  },
-  lgsoho: {
-    name: 'LG소호',
-    columns: ['유형','LG소호 상품','상부점'],
-    rows: [
-      row(['단독','100M','타임'],'warn'),
-      row(['단독','500M','광합성']),
-      row(['단독','1G','광합성']),
-      row(['인+전','100M+팩스(CPG)','디컴스']),
-      row(['인+전','100M+자유4','디컴스']),
-      row(['인+전','100M+자유6','디컴스']),
-      row(['인+전','100M+AI전화','디컴스']),
-      row(['인+전','500M+팩스(CPG)','새용마']),
-      row(['인+전','500M+자유4','새용마']),
-      row(['인+전','500M+자유6','새용마']),
-      row(['인+전','500M+AI전화','새용마']),
-      row(['인+전','1G+팩스(CPG)','디컴스']),
-      row(['인+전','1G+자유4','디컴스']),
-      row(['인+전','1G+자유6','디컴스']),
-      row(['인+전','1G+AI전화','디컴스']),
-      row(['인+티','100M+TV','디컴스']),
-      row(['인+티','500M+TV','디컴스']),
-      row(['인+티','1G+TV','디컴스']),
-      row(['인+티+전','100M+TV+팩스(CPG)','디컴스']),
-      row(['인+티+전','100M+TV+자유4','디컴스']),
-      row(['인+티+전','100M+TV+자유6','디컴스']),
-      row(['인+티+전','100M+TV+AI전화','디컴스']),
-      row(['인+티+전','500M+TV+팩스(CPG)','새용마']),
-      row(['인+티+전','500M+TV+자유4','새용마']),
-      row(['인+티+전','500M+TV+자유6','새용마']),
-      row(['인+티+전','500M+TV+AI전화','새용마']),
-      row(['인+티+전','1G+TV+팩스(CPG)','새용마']),
-      row(['인+티+전','1G+TV+자유4','새용마']),
-      row(['인+티+전','1G+TV+자유6','새용마']),
-      row(['인+티+전','1G+TV+AI전화','새용마']),
-      row(['기타','100M+에스원(CCTV)','새용마']),
-      row(['기타','500M+에스원(CCTV)','디컴스']),
-      row(['기타','1G+에스원(CCTV)','디컴스']),
-      row(['기타','에스원 단독','디컴스'])
-    ],
-    note: { type:'warn', title:'상부점 참고', body:'TPS, 추가티비 = 디컴스\n200M 상품 = 새용마' },
-    updatedAt: new Date().toISOString()
-  },
-  hello: {
-    name: '헬로비전',
-    columns: ['헬로비전 상품유형','상부점'],
-    rows: [ row(['전 상품','드림']) ],
-    note: { type:'none', title:'', body:'' },
-    updatedAt: new Date().toISOString()
-  }
-};
+const SAVE_DEBOUNCE_MS = 700;
+const MAX_RETRY = 3;
+const VIEWER_REFRESH_MS = 60000;   // 보기 전용일 때만 자동 새로고침
 
 /* =========================================================
    상태
    ========================================================= */
-let state = {
-  carriers: JSON.parse(JSON.stringify(defaultCarriers)),
-  carrierOrder: ['kt','sky','skb','lg','lgsoho','hello'],
-  updatedAt: new Date().toISOString()
-};
-let currentCarrierId = state.carrierOrder[0];
-let session = { token: null, role: null }; // role: null | 'edit' | 'super'
+function row(cells, hl){ return { cells: cells, hl: hl || 'none' }; }
+
+// 서버에서 불러오기 전에는 비어 있다. (예전처럼 "샘플 데이터"를 보여주지 않는다 —
+//  불러오기 실패 상태에서 편집하면 실제 공지를 덮어쓸 위험이 있었기 때문)
+let state = { carriers: {}, carrierOrder: [], updatedAt: null };
+let currentCarrierId = null;
+let session = { token: null, role: null, expiresAt: null };
 let undoStack = [];
 let redoStack = [];
 let saveTimer = null;
+let viewerTimer = null;
 let dragRowIndex = null;
 let dragCarrierId = null;
-let loadOk = false;     // 시트에서 현재 공지를 정상적으로 불러왔는가 (실패 시 편집 잠금)
-let dirty = false;      // 서버에 저장되지 않은 수정이 있는가
-let typing = false;     // 셀에 타이핑 중이나 아직 blur(확정) 안 된 상태
-const MAX_RETRY = 3;
+
+let loadOk = false;                     // 서버에서 현재 공지를 정상적으로 불러왔는가
+let dirtyCarriers = new Set();          // 저장해야 할 통신사 id
+let deletedCarriers = new Set();        // 삭제해야 할 통신사 id
+let typing = false;                     // 셀에 타이핑 중이나 아직 blur(확정) 안 됨
+let saving = false;                     // 저장 요청 진행 중 (중복 실행 방지)
+let isDefaultPassword = false;
+let pendingConflict = null;
 
 try {
   const savedSession = sessionStorage.getItem('jeobsu_session');
   if (savedSession) session = JSON.parse(savedSession);
 } catch(e){}
+
+function hasUnsaved(){ return dirtyCarriers.size > 0 || deletedCarriers.size > 0; }
 
 /* =========================================================
    유틸
@@ -312,51 +233,17 @@ function relativeTime(iso){
   return day + '일 전';
 }
 
+function dateTimeLabel(iso){
+  if(!iso) return '-';
+  const d = new Date(iso);
+  return String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' ' +
+         String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
 function todayLabel(){
   const d = new Date();
   const days = ['일','월','화','수','목','금','토'];
   return d.getFullYear() + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + String(d.getDate()).padStart(2,'0') + ' (' + days[d.getDay()] + ')';
-}
-
-function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
-
-function pushUndo(){
-  undoStack.push(deepClone(state));
-  if(undoStack.length > 50) undoStack.shift();
-  redoStack = [];
-}
-
-function undo(){
-  if(undoStack.length === 0) return;
-  redoStack.push(deepClone(state));
-  state = undoStack.pop();
-  if(!state.carriers[currentCarrierId]) currentCarrierId = state.carrierOrder[0];
-  render();
-  scheduleSave();
-}
-function redo(){
-  if(redoStack.length === 0) return;
-  undoStack.push(deepClone(state));
-  state = redoStack.pop();
-  if(!state.carriers[currentCarrierId]) currentCarrierId = state.carrierOrder[0];
-  render();
-  scheduleSave();
-}
-
-function touch(carrierId){
-  if(carrierId && state.carriers[carrierId]) state.carriers[carrierId].updatedAt = new Date().toISOString();
-  state.updatedAt = new Date().toISOString();
-  scheduleSave();
-}
-
-/* =========================================================
-   구글시트 연동
-   ========================================================= */
-function setSaveStatus(text, kind){
-  // kind: undefined | 'ok' | 'warn' | 'err'
-  const el = document.getElementById('saveStatus');
-  el.textContent = text;
-  el.className = 'save-status' + (kind ? ' ' + kind : '');
 }
 
 function clockLabel(){
@@ -366,32 +253,139 @@ function clockLabel(){
 
 function isWhale(){ return /Whale/i.test(navigator.userAgent); }
 
-function scheduleSave(){
-  renderHeader();
-  renderSidebar();
-  if(!loadOk){ return; } // 불러오기 실패 상태에서는 절대 저장하지 않는다 (실제 공지 덮어쓰기 방지)
-  if(!SHEET_URL){ setSaveStatus('저장됨 (브라우저 메모리, 새로고침시 초기화)'); return; }
-  dirty = true;
-  setSaveStatus('저장 중…', 'warn');
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(function(){ saveToSheet(0); }, 700);
+function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
+
+function escapeHtml(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
-/* ---------- 저장 실패 배너 ---------- */
+function latestUpdatedAt(){
+  let best = null;
+  state.carrierOrder.forEach(id=>{
+    const c = state.carriers[id];
+    if(c && c.updatedAt && (!best || new Date(c.updatedAt) > new Date(best))) best = c.updatedAt;
+  });
+  return best;
+}
+
+function pushUndo(){
+  undoStack.push(deepClone(state));
+  if(undoStack.length > 50) undoStack.shift();
+  redoStack = [];
+}
+
+function markAllDirty(){
+  state.carrierOrder.forEach(id=>{ if(state.carriers[id]) dirtyCarriers.add(id); });
+}
+
+function undo(){
+  if(undoStack.length === 0) return;
+  redoStack.push(deepClone(state));
+  state = undoStack.pop();
+  if(!state.carriers[currentCarrierId]) currentCarrierId = state.carrierOrder[0] || null;
+  markAllDirty();
+  render();
+  scheduleSave();
+}
+function redo(){
+  if(redoStack.length === 0) return;
+  undoStack.push(deepClone(state));
+  state = redoStack.pop();
+  if(!state.carriers[currentCarrierId]) currentCarrierId = state.carrierOrder[0] || null;
+  markAllDirty();
+  render();
+  scheduleSave();
+}
+
+/* 한 통신사만 바뀌었을 때는 그 통신사만, 순서/목록이 바뀌었을 때는 전체를 저장 대상으로 표시 */
+function touch(carrierId){
+  if(carrierId && state.carriers[carrierId]){
+    state.carriers[carrierId].updatedAt = new Date().toISOString();
+    dirtyCarriers.add(carrierId);
+  } else {
+    markAllDirty();
+  }
+  state.updatedAt = new Date().toISOString();
+  scheduleSave();
+}
+
+/* =========================================================
+   Supabase 호출 (실패 원인을 코드로 구분해서 돌려준다)
+   ========================================================= */
+async function rpc(fn, args, opts){
+  opts = opts || {};
+  let res, text;
+  try{
+    res = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(args || {}),
+      keepalive: !!opts.keepalive
+    });
+  } catch(err){
+    return { ok:false, code:'BLOCKED',
+      detail:'요청이 브라우저에서 차단되었거나 Supabase 서버에 닿지 못했습니다. (' +
+             (err && err.message ? err.message : String(err)) + ')' };
+  }
+  try{
+    text = await res.text();
+  } catch(err){
+    return { ok:false, code:'READ_FAIL', detail:'응답을 읽지 못했습니다. (' + (err && err.message ? err.message : String(err)) + ')' };
+  }
+  if(!res.ok){
+    return { ok:false, code:'HTTP' + res.status,
+      detail:'Supabase가 HTTP ' + res.status + ' ' + (res.statusText||'') + ' 로 응답했습니다. 응답 앞부분: ' +
+             text.slice(0,200).replace(/\s+/g,' ') };
+  }
+  let data;
+  try{
+    data = JSON.parse(text);
+  } catch(err){
+    return { ok:false, code:'NOT_JSON',
+      detail:'JSON이 아닌 응답이 돌아왔습니다. 응답 앞부분: ' + text.slice(0,150).replace(/\s+/g,' ') };
+  }
+  return { ok:true, data:data };
+}
+
+/* =========================================================
+   상태 표시 / 경고 배너
+   ========================================================= */
+function setSaveStatus(text, kind){
+  const el = document.getElementById('saveStatus');
+  el.textContent = text;
+  el.className = 'save-status' + (kind ? ' ' + kind : '');
+}
+
+function bannerEl(){ return document.getElementById('alertBanner'); }
+
+function hideSaveBanner(){
+  const el = bannerEl();
+  el.classList.add('hidden');
+  el.classList.remove('soft');
+  el.innerHTML = '';
+}
+
+function browserHintHtml(){
+  return isWhale()
+    ? ' <span style="color:var(--text-secondary)">(지금 웨일 브라우저로 접속 중입니다. 웨일의 광고·트래커 차단 기능이 요청을 막는 경우가 있습니다.)</span>'
+    : ' <span style="color:var(--text-secondary)">(브라우저의 광고·트래커 차단 기능이나 확장프로그램이 원인일 수 있습니다.)</span>';
+}
+
 function showSaveBanner(code, detail){
-  const el = document.getElementById('alertBanner');
+  const el = bannerEl();
   const browserIssue = (code === 'BLOCKED' || code === 'NOT_JSON' || code.indexOf('HTTP') === 0);
   el.classList.remove('hidden');
+  el.classList.remove('soft');
   el.innerHTML =
     '<div class="ab-title">⚠ 수정 내용이 아직 저장되지 않았습니다</div>' +
     '<div class="ab-body">' +
       '화면에 보이는 수정 내용은 <b>내 브라우저 안에만</b> 있습니다. 지금 창을 닫거나 새로고침하면 그대로 사라집니다.' +
-      (browserIssue
-        ? '<br><b>크롬(Chrome)으로 이 페이지를 다시 열어서 수정하면 대부분 해결됩니다.</b>' +
-          (isWhale()
-            ? ' <span style="color:var(--text-secondary)">(지금 웨일 브라우저로 접속 중입니다. 웨일의 광고·트래커 차단 기능이 구글 서버 요청을 막는 경우가 있습니다.)</span>'
-            : ' <span style="color:var(--text-secondary)">(브라우저의 광고·트래커 차단 기능이나 확장프로그램이 원인일 수 있습니다.)</span>')
-        : '') +
+      (browserIssue ? '<br><b>크롬(Chrome)으로 이 페이지를 다시 열어서 수정하면 대부분 해결됩니다.</b>' + browserHintHtml() : '') +
     '</div>' +
     '<div class="ab-detail">오류 코드: ' + escapeHtml(code) + ' — ' + escapeHtml(detail) + '</div>' +
     '<div class="ab-actions">' +
@@ -400,144 +394,18 @@ function showSaveBanner(code, detail){
     '</div>';
 }
 
-function hideSaveBanner(){
-  const el = document.getElementById('alertBanner');
-  el.classList.add('hidden');
-  el.innerHTML = '';
-}
-
-function retrySaveNow(){
-  clearTimeout(saveTimer);
-  saveToSheet(0);
-}
-
-/* ---------- 저장 (실패 원인 구분 + 자동 재시도) ---------- */
-function onSaveFailure(retry, code, detail, noRetry){
-  if(!noRetry && retry < MAX_RETRY){
-    const delays = [800, 2000, 5000];
-    const wait = delays[retry] || 5000;
-    setSaveStatus('저장 실패(' + code + ') · ' + Math.round(wait/1000) + '초 후 자동 재시도 ' + (retry+1) + '/' + MAX_RETRY, 'err');
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(function(){ saveToSheet(retry + 1); }, wait);
-    return;
-  }
-  setSaveStatus('저장 실패 (' + code + ') — 위 경고 확인', 'err');
-  showSaveBanner(code, detail);
-}
-
-async function saveToSheet(retry){
-  retry = retry || 0;
-  if(!SHEET_URL) return;
-
-  setSaveStatus(retry ? ('저장 재시도 중… (' + retry + '/' + MAX_RETRY + ')') : '저장 중…', 'warn');
-
-  let res, text;
-  try{
-    res = await fetch(SHEET_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action:'save', token: session.token, state: state }),
-      keepalive: true
-    });
-  } catch(err){
-    // fetch 자체가 실패 = 브라우저 차단(광고/트래커 차단, 확장프로그램) 또는 CORS 리다이렉트 차단, 또는 진짜 네트워크 단절
-    return onSaveFailure(retry, 'BLOCKED',
-      '요청이 브라우저에서 차단되었거나 구글 서버에 닿지 못했습니다. (' + (err && err.message ? err.message : String(err)) + ')');
-  }
-
-  try{
-    text = await res.text();
-  } catch(err){
-    return onSaveFailure(retry, 'READ_FAIL', '응답을 읽지 못했습니다. (' + (err && err.message ? err.message : String(err)) + ')');
-  }
-
-  if(!res.ok){
-    return onSaveFailure(retry, 'HTTP' + res.status,
-      '구글 서버가 HTTP ' + res.status + ' ' + (res.statusText || '') + ' 로 응답했습니다. 응답 앞부분: ' + text.slice(0,120).replace(/\s+/g,' '));
-  }
-
-  let data;
-  try{
-    data = JSON.parse(text);
-  } catch(err){
-    return onSaveFailure(retry, 'NOT_JSON',
-      'JSON이 아닌 응답이 돌아왔습니다(구글 로그인 페이지나 오류 페이지일 가능성). 응답 앞부분: ' + text.slice(0,150).replace(/\s+/g,' '));
-  }
-
-  if(data.ok){
-    dirty = false;
-    hideSaveBanner();
-    setSaveStatus('저장됨 · ' + clockLabel(), 'ok');
-    return;
-  }
-
-  if(data.needsAuth){
-    session = { token:null, role:null };
-    sessionStorage.removeItem('jeobsu_session');
-    setSaveStatus('세션 만료 — 다시 로그인하면 자동으로 저장됩니다.', 'err');
-    showSaveBanner('SESSION_EXPIRED', '로그인 세션이 만료되어 저장이 거부되었습니다. 다시 로그인하면 방금 수정 내용이 자동으로 저장됩니다.');
-    renderToolbar(); renderSidebar(); renderTable();
-    if(!window.__authPromptOpen){
-      window.__authPromptOpen = true;
-      openAuthModal(function(){ window.__authPromptOpen = false; saveToSheet(0); }, false);
-    }
-    return;
-  }
-
-  // 서버가 정상 응답했는데 ok:false → 재시도해도 같은 결과이므로 즉시 알림
-  onSaveFailure(retry, 'SERVER', data.error || '알 수 없는 서버 오류', true);
-}
-
-async function loadFromSheet(){
-  if(!SHEET_URL){ loadOk = true; render(); return; }
-  let res, text;
-  try{
-    res = await fetch(SHEET_URL);
-    text = await res.text();
-  } catch(err){
-    return onLoadFailure('BLOCKED',
-      '요청이 브라우저에서 차단되었거나 구글 서버에 닿지 못했습니다. (' + (err && err.message ? err.message : String(err)) + ')');
-  }
-  if(!res.ok){
-    return onLoadFailure('HTTP' + res.status,
-      '구글 서버가 HTTP ' + res.status + ' 로 응답했습니다. 응답 앞부분: ' + text.slice(0,120).replace(/\s+/g,' '));
-  }
-  let data;
-  try{
-    data = JSON.parse(text);
-  } catch(err){
-    return onLoadFailure('NOT_JSON',
-      'JSON이 아닌 응답이 돌아왔습니다(구글 로그인 페이지나 오류 페이지일 가능성). 응답 앞부분: ' + text.slice(0,150).replace(/\s+/g,' '));
-  }
-  if(!data.ok){
-    return onLoadFailure('SERVER', data.error || '알 수 없는 서버 오류');
-  }
-  if(data.state){
-    state = data.state;
-    if(!state.carrierOrder || !state.carrierOrder.length){
-      state.carrierOrder = Object.keys(state.carriers||{});
-    }
-    currentCarrierId = state.carrierOrder[0];
-  }
-  loadOk = true;
-  setSaveStatus('불러오기 완료 · ' + clockLabel(), 'ok');
-  render();
-}
-
-/* 불러오기가 실패했는데 그대로 편집하면, 화면의 "초기 샘플 데이터"가
-   실제 시트 내용을 통째로 덮어쓸 수 있다. 그래서 편집·저장을 아예 막는다. */
+/* 불러오기 실패 — 편집을 아예 잠근다 */
 function onLoadFailure(code, detail){
   loadOk = false;
   setSaveStatus('불러오기 실패 (' + code + ') — 편집 잠김', 'err');
-  const el = document.getElementById('alertBanner');
+  const el = bannerEl();
   el.classList.remove('hidden');
+  el.classList.remove('soft');
   el.innerHTML =
     '<div class="ab-title">⚠ 현재 공지 내용을 불러오지 못했습니다 — 편집이 잠겼습니다</div>' +
     '<div class="ab-body">' +
-      '지금 화면에 보이는 표는 <b>실제 공지가 아니라 초기 샘플 데이터</b>입니다. ' +
-      '이 상태에서 수정하면 실제 공지가 통째로 지워질 수 있어 편집을 막아두었습니다.' +
-      '<br><b>크롬(Chrome)으로 이 페이지를 다시 열어주세요.</b>' +
-      (isWhale() ? ' <span style="color:var(--text-secondary)">(지금 웨일 브라우저로 접속 중입니다. 웨일의 광고·트래커 차단 기능이 구글 서버 요청을 막는 경우가 있습니다.)</span>' : '') +
+      '서버에서 공지를 받아오지 못했습니다. 잘못된 내용으로 실제 공지를 덮어쓰지 않도록 편집을 막아두었습니다.' +
+      '<br><b>크롬(Chrome)으로 이 페이지를 다시 열어주세요.</b>' + browserHintHtml() +
     '</div>' +
     '<div class="ab-detail">오류 코드: ' + escapeHtml(code) + ' — ' + escapeHtml(detail) + '</div>' +
     '<div class="ab-actions">' +
@@ -546,66 +414,269 @@ function onLoadFailure(code, detail){
   render();
 }
 
+/* 동시 수정 충돌 */
+function showConflictBanner(carrierId, serverCarrier){
+  const mine = state.carriers[carrierId] || {};
+  const myRows = (mine.rows || []).length;
+  const svRows = (serverCarrier.rows || []).length;
+  pendingConflict = { carrierId: carrierId, serverVersion: serverCarrier.version };
+  const el = bannerEl();
+  el.classList.remove('hidden');
+  el.classList.add('soft');
+  el.innerHTML =
+    '<div class="ab-title">⚠ 동시 수정 충돌 — ' + escapeHtml(mine.name || carrierId) + '</div>' +
+    '<div class="ab-body">' +
+      '내가 이 화면을 열어둔 사이에 <b>다른 담당자가 같은 통신사를 먼저 수정</b>했습니다. ' +
+      '그대로 저장하면 그 수정이 사라집니다.<br>' +
+      '내 화면: ' + myRows + '행 · 서버: ' + svRows + '행 (' + escapeHtml(serverCarrier.name || '') + ')' +
+    '</div>' +
+    '<div class="ab-actions">' +
+      '<button class="primary" onclick="conflictTakeServer()">서버 내용 불러오기 (내 수정 취소)</button>' +
+      '<button onclick="conflictOverwrite()">내 수정으로 덮어쓰기</button>' +
+    '</div>';
+  setSaveStatus('동시 수정 충돌 — 위에서 선택해주세요', 'err');
+}
+
+function conflictTakeServer(){
+  if(!confirm('내가 방금 수정한 내용을 버리고 서버 내용을 다시 불러옵니다. 계속할까요?')) return;
+  dirtyCarriers.clear();
+  deletedCarriers.clear();
+  pendingConflict = null;
+  hideSaveBanner();
+  location.reload();
+}
+
+function conflictOverwrite(){
+  if(!pendingConflict) return;
+  if(!confirm('다른 담당자의 수정을 내 내용으로 덮어씁니다. 계속할까요?')) return;
+  const c = state.carriers[pendingConflict.carrierId];
+  if(c) c.version = pendingConflict.serverVersion;   // 서버 최신 버전 기준으로 다시 저장
+  pendingConflict = null;
+  hideSaveBanner();
+  saveDirty(0);
+}
+
+/* =========================================================
+   불러오기
+   ========================================================= */
+function applyLoaded(d){
+  const carriers = {};
+  const order = [];
+  (d.carriers || []).forEach(function(c){
+    carriers[c.id] = {
+      name: c.name,
+      columns: c.columns || [],
+      rows: c.rows || [],
+      note: c.note || { type:'none', title:'', body:'' },
+      updatedAt: c.updatedAt,
+      updatedBy: c.updatedBy,
+      version: c.version
+    };
+    order.push(c.id);
+  });
+  state = { carriers: carriers, carrierOrder: order, updatedAt: null };
+  state.updatedAt = latestUpdatedAt();
+  if(!state.carriers[currentCarrierId]) currentCarrierId = order[0] || null;
+}
+
+async function loadFromDb(){
+  const r = await rpc('reception_load', {});
+  if(!r.ok) return onLoadFailure(r.code, r.detail);
+  const d = r.data;
+  if(!d || d.ok !== true){
+    return onLoadFailure('SERVER', (d && d.error) || '서버가 올바른 응답을 주지 않았습니다.');
+  }
+  if(!d.carriers || d.carriers.length === 0){
+    return onLoadFailure('EMPTY', '서버에 등록된 통신사 공지가 없습니다. 관리자에게 문의해주세요.');
+  }
+  applyLoaded(d);
+  loadOk = true;
+  hideSaveBanner();
+  setSaveStatus('불러오기 완료 · ' + clockLabel(), 'ok');
+  render();
+  startViewerRefresh();
+}
+
+/* 보기 전용일 때만 주기적으로 최신 공지를 받아온다.
+   편집 중인 사람의 화면은 절대 자동으로 바꾸지 않는다. */
+function startViewerRefresh(){
+  clearInterval(viewerTimer);
+  viewerTimer = setInterval(async function(){
+    if(isEdit() || hasUnsaved() || typing) return;
+    if(document.visibilityState !== 'visible') return;
+    const r = await rpc('reception_load', {});
+    if(!r.ok || !r.data || r.data.ok !== true) return;
+    applyLoaded(r.data);
+    render();
+  }, VIEWER_REFRESH_MS);
+}
+
+/* =========================================================
+   저장 (통신사 단위 · 버전 충돌 감지 · 자동 재시도)
+   ========================================================= */
+function scheduleSave(){
+  renderHeader();
+  renderSidebar();
+  if(!loadOk) return;              // 불러오기 실패 상태에서는 절대 저장하지 않는다
+  setSaveStatus('저장 중…', 'warn');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(function(){ saveDirty(0); }, SAVE_DEBOUNCE_MS);
+}
+
+function retrySaveNow(){
+  clearTimeout(saveTimer);
+  saveDirty(0);
+}
+
+function onSaveFailure(retry, code, detail, noRetry){
+  saving = false;
+  if(!noRetry && retry < MAX_RETRY){
+    const delays = [800, 2000, 5000];
+    const wait = delays[retry] || 5000;
+    setSaveStatus('저장 실패(' + code + ') · ' + Math.round(wait/1000) + '초 후 자동 재시도 ' + (retry+1) + '/' + MAX_RETRY, 'err');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){ saveDirty(retry + 1); }, wait);
+    return;
+  }
+  setSaveStatus('저장 실패 (' + code + ') — 위 경고 확인', 'err');
+  showSaveBanner(code, detail);
+}
+
+function handleNeedsAuth(){
+  saving = false;
+  session = { token:null, role:null, expiresAt:null };
+  sessionStorage.removeItem('jeobsu_session');
+  setSaveStatus('세션 만료 — 다시 로그인하면 자동으로 저장됩니다.', 'err');
+  showSaveBanner('SESSION_EXPIRED',
+    '로그인 세션이 만료되어 저장이 거부되었습니다. 다시 로그인하면 방금 수정 내용이 자동으로 저장됩니다.');
+  renderToolbar(); renderSidebar(); renderTable();
+  if(!window.__authPromptOpen){
+    window.__authPromptOpen = true;
+    openAuthModal(function(){ window.__authPromptOpen = false; saveDirty(0); }, false);
+  }
+}
+
+function carrierPayload(id){
+  const c = state.carriers[id];
+  return {
+    id: id,
+    name: c.name,
+    pos: state.carrierOrder.indexOf(id) + 1,
+    columns: c.columns,
+    rows: c.rows,
+    note: c.note
+  };
+}
+
+async function saveDirty(retry){
+  retry = retry || 0;
+  if(!loadOk) return;
+  if(saving) return;
+  if(!hasUnsaved()){
+    setSaveStatus('저장됨 · ' + clockLabel(), 'ok');
+    return;
+  }
+  if(!session.token){ return handleNeedsAuth(); }
+
+  saving = true;
+  setSaveStatus(retry ? ('저장 재시도 중… (' + retry + '/' + MAX_RETRY + ')') : '저장 중…', 'warn');
+
+  // 1) 삭제 먼저
+  for(const id of Array.from(deletedCarriers)){
+    const r = await rpc('reception_delete_carrier', { p_token: session.token, p_id: id });
+    if(!r.ok) return onSaveFailure(retry, r.code, r.detail);
+    const d = r.data || {};
+    if(d.ok){ deletedCarriers.delete(id); continue; }
+    if(d.code === 'NEEDS_AUTH') return handleNeedsAuth();
+    return onSaveFailure(retry, d.code || 'SERVER', d.error || '알 수 없는 서버 오류', true);
+  }
+
+  // 2) 수정 / 추가 (통신사별로 따로 저장 → 다른 통신사를 고친 사람과 충돌하지 않는다)
+  for(const id of Array.from(dirtyCarriers)){
+    const c = state.carriers[id];
+    if(!c){ dirtyCarriers.delete(id); continue; }
+    const r = await rpc('reception_save_carrier', {
+      p_token: session.token,
+      p_carrier: carrierPayload(id),
+      p_base_version: (typeof c.version === 'number' ? c.version : null)
+    });
+    if(!r.ok) return onSaveFailure(retry, r.code, r.detail);
+    const d = r.data || {};
+    if(d.ok){
+      c.version = d.version;
+      c.updatedAt = d.updatedAt;
+      dirtyCarriers.delete(id);
+      continue;
+    }
+    if(d.code === 'NEEDS_AUTH') return handleNeedsAuth();
+    if(d.code === 'CONFLICT'){ saving = false; return showConflictBanner(id, d.server || {}); }
+    return onSaveFailure(retry, d.code || 'SERVER', d.error || '알 수 없는 서버 오류', true);
+  }
+
+  saving = false;
+  state.updatedAt = latestUpdatedAt();
+  hideSaveBanner();
+  setSaveStatus('저장됨 · ' + clockLabel(), 'ok');
+  renderHeader();
+  renderSidebar();
+}
+
 /* =========================================================
    인증
    ========================================================= */
 function openAuthModal(onSuccess, requireSuper){
   const root = document.getElementById('modalRoot');
-  root.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>${requireSuper ? '관리자 인증' : '정책 담당자 인증'}</h2>
-        <div class="modal-row">
-          <label>비밀번호</label>
-          <input type="password" id="authPw" autofocus>
-        </div>
-        <div class="modal-actions">
-          <button onclick="closeModal()">취소</button>
-          <button class="primary" onclick="submitAuth(${requireSuper ? 'true' : 'false'})">확인</button>
-        </div>
-      </div>
-    </div>`;
-  setTimeout(()=>{ const el = document.getElementById('authPw'); if(el){ el.focus(); el.onkeydown = (e)=>{ if(e.key==='Enter') submitAuth(requireSuper); }; } }, 0);
+  root.innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this) closeModal()">' +
+      '<div class="modal">' +
+        '<h2>' + (requireSuper ? '관리자 인증' : '정책 담당자 인증') + '</h2>' +
+        '<div class="modal-row"><label>비밀번호</label><input type="password" id="authPw"></div>' +
+        '<div class="modal-actions">' +
+          '<button onclick="closeModal()">취소</button>' +
+          '<button class="primary" onclick="submitAuth(' + (requireSuper ? 'true' : 'false') + ')">확인</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  setTimeout(function(){
+    const el = document.getElementById('authPw');
+    if(el){ el.focus(); el.onkeydown = function(e){ if(e.key === 'Enter') submitAuth(requireSuper); }; }
+  }, 0);
   window.__authSuccess = onSuccess;
 }
 
 async function submitAuth(requireSuper){
-  const pw = document.getElementById('authPw').value;
-  if(!SHEET_URL){
-    // 로컬 전용 모드: 서버 없이 하드코드 비교(데모용). 실제 배포시 SHEET_URL 연결 필수.
-    const role = pw === '0000' ? 'super' : (pw === '1234' ? 'edit' : null);
-    if(!role || (requireSuper && role !== 'super')){ alert('비밀번호가 올바르지 않습니다.'); return; }
-    session = { token:'local', role };
-    sessionStorage.setItem('jeobsu_session', JSON.stringify(session));
-    closeModal();
-    if(window.__authSuccess) window.__authSuccess();
-    render();
+  const input = document.getElementById('authPw');
+  if(!input) return;
+  const pw = input.value;
+  const r = await rpc('reception_login', { p_password: pw });
+  if(!r.ok){
+    alert('로그인 요청이 실패했습니다.\n\n오류 코드: ' + r.code + '\n' + r.detail +
+          (r.code === 'BLOCKED' ? '\n\n크롬(Chrome)으로 다시 열어보세요.' : ''));
     return;
   }
-  try{
-    const res = await fetch(SHEET_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({ action:'auth', password: pw })
-    });
-    const data = await res.json();
-    if(!data.ok){ alert(data.error || '비밀번호가 올바르지 않습니다.'); return; }
-    if(requireSuper && data.role !== 'super'){ alert('관리자 권한이 필요합니다.'); return; }
-    session = { token: data.token, role: data.role };
-    sessionStorage.setItem('jeobsu_session', JSON.stringify(session));
-    closeModal();
-    if(window.__authSuccess) window.__authSuccess();
-    render();
-  } catch(err){
-    alert('인증 요청 중 오류가 발생했습니다.');
-  }
+  const d = r.data || {};
+  if(!d.ok){ alert(d.error || '비밀번호가 올바르지 않습니다.'); return; }
+  if(requireSuper && d.role !== 'super'){ alert('관리자 권한이 필요합니다.'); return; }
+
+  session = { token: d.token, role: d.role, expiresAt: d.expiresAt };
+  isDefaultPassword = !!d.isDefaultPassword;
+  try{ sessionStorage.setItem('jeobsu_session', JSON.stringify(session)); } catch(e){}
+  closeModal();
+  if(window.__authSuccess) window.__authSuccess();
+  render();
 }
 
-function logout(){
-  session = { token:null, role:null };
+async function logout(){
+  if(hasUnsaved() && !confirm('저장되지 않은 수정이 있습니다. 그래도 수정을 종료할까요?')) return;
+  const tok = session.token;
+  session = { token:null, role:null, expiresAt:null };
+  isDefaultPassword = false;
   sessionStorage.removeItem('jeobsu_session');
-  renderToolbar();
+  dirtyCarriers.clear();
+  deletedCarriers.clear();
+  hideSaveBanner();
   render();
+  if(tok) rpc('reception_logout', { p_token: tok });
 }
 
 function closeModal(){ window.__authPromptOpen = false; document.getElementById('modalRoot').innerHTML = ''; }
@@ -618,6 +689,7 @@ function render(){
   renderToolbar();
   renderSidebar();
   renderTable();
+  renderPwNotice();
 }
 
 function renderHeader(){
@@ -625,7 +697,20 @@ function renderHeader(){
   const c = state.carriers[currentCarrierId];
   document.getElementById('subline').innerHTML =
     '전체 최종 갱신 <b>' + relativeTime(state.updatedAt) + '</b>' +
-    (c ? ' · 지금 보는 중: <b>' + c.name + '</b> (' + relativeTime(c.updatedAt) + ' 수정)' : '');
+    (c ? ' · 지금 보는 중: <b>' + escapeHtml(c.name) + '</b> (' + relativeTime(c.updatedAt) + ' 수정)' : '') +
+    (hasUnsaved() ? ' · <b style="color:var(--danger-text)">저장 안 된 수정 ' + (dirtyCarriers.size + deletedCarriers.size) + '건</b>' : '');
+}
+
+function renderPwNotice(){
+  const el = document.getElementById('pwNotice');
+  if(isSuper() && isDefaultPassword){
+    el.classList.remove('hidden');
+    el.innerHTML = '🔑 지금 <b>기본 비밀번호</b>로 로그인했습니다. ' +
+      '이 상태로 두면 누구나 공지를 고칠 수 있으니 <b>비밀번호 변경</b>에서 바꿔주세요.';
+  } else {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+  }
 }
 
 function renderToolbar(){
@@ -635,50 +720,56 @@ function renderToolbar(){
   if(isEdit()){
     foot.classList.remove('hidden');
     legend.classList.remove('hidden');
-    left.innerHTML = `
-      <button class="small" onclick="undo()" title="실행취소 (Ctrl+Z)">↶ 실행취소</button>
-      <button class="small" onclick="redo()" title="다시실행 (Ctrl+Shift+Z)">↷ 다시실행</button>
-      <button class="small" onclick="openAddRowModal()">+ 행추가</button>
-      <button class="small" onclick="openColumnModal()">+ 열추가</button>
-      <button class="small" onclick="openNoteModal()">주의사항 편집</button>
-      ${isSuper() ? '<button class="small" onclick="openChangePwModal()">비밀번호 변경</button>' : ''}
-      <button class="small" onclick="logout()">수정 종료</button>
-    `;
+    left.innerHTML =
+      '<button class="small" onclick="undo()" title="실행취소 (Ctrl+Z)">↶ 실행취소</button>' +
+      '<button class="small" onclick="redo()" title="다시실행 (Ctrl+Shift+Z)">↷ 다시실행</button>' +
+      '<button class="small" onclick="openAddRowModal()">+ 행추가</button>' +
+      '<button class="small" onclick="openColumnModal()">+ 열추가</button>' +
+      '<button class="small" onclick="openNoteModal()">주의사항 편집</button>' +
+      '<button class="small" onclick="openHistoryModal()">수정 이력</button>' +
+      (isSuper() ? '<button class="small" onclick="openChangePwModal()">비밀번호 변경</button>' : '') +
+      '<button class="small" onclick="logout()">수정 종료</button>';
   } else if(!loadOk){
     foot.classList.add('hidden');
     legend.classList.add('hidden');
-    left.innerHTML = `<span class="hint">🔒 현재 공지를 불러오지 못해 편집이 잠겨 있습니다. 위 안내를 확인해주세요.</span>`;
+    left.innerHTML = '<span class="hint">🔒 현재 공지를 불러오지 못해 편집이 잠겨 있습니다. 위 안내를 확인해주세요.</span>';
   } else {
     foot.classList.add('hidden');
     legend.classList.add('hidden');
-    left.innerHTML = `<button class="small primary" onclick="openAuthModal(null, false)">정책 담당자 로그인</button>
-      <span class="hint" style="margin-left:6px;">※ 관리자 비밀번호로 입력하면 관리자 권한으로 자동 로그인됩니다</span>`;
+    left.innerHTML = '<button class="small primary" onclick="openAuthModal(null, false)">정책 담당자 로그인</button>' +
+      '<span class="hint" style="margin-left:6px;">※ 관리자 비밀번호로 입력하면 관리자 권한으로 자동 로그인됩니다</span>';
   }
 }
 
 function renderSidebar(){
   const el = document.getElementById('carrierList');
   el.innerHTML = '';
-  state.carrierOrder.forEach((id, idx)=>{
+  state.carrierOrder.forEach(function(id){
     const c = state.carriers[id];
     if(!c) return;
+    const unsaved = dirtyCarriers.has(id);
     const item = document.createElement('div');
     item.className = 'carrier-item' + (id === currentCarrierId ? ' active' : '');
     item.draggable = isEdit();
     item.dataset.id = id;
-    item.innerHTML = `
-      ${isEdit() ? '<span class="grip">⠿</span>' : ''}
-      <div class="info">
-        <div class="name">${escapeHtml(c.name)}</div>
-        <div class="time">${relativeTime(c.updatedAt)} 수정</div>
-      </div>
-    `;
-    item.onclick = (e)=>{ if(e.target.classList.contains('grip')) return; currentCarrierId = id; render(); };
+    item.innerHTML =
+      (isEdit() ? '<span class="grip">⠿</span>' : '') +
+      '<div class="info">' +
+        '<div class="name">' + escapeHtml(c.name) + '</div>' +
+        '<div class="time' + (unsaved ? ' unsaved' : '') + '">' +
+          (unsaved ? '● 저장 안 됨' : relativeTime(c.updatedAt) + ' 수정') +
+        '</div>' +
+      '</div>';
+    item.onclick = function(e){
+      if(e.target.classList.contains('grip')) return;
+      currentCarrierId = id;
+      render();
+    };
     if(isEdit()){
-      item.ondragstart = ()=>{ dragCarrierId = id; };
-      item.ondragover = (e)=>{ e.preventDefault(); item.classList.add('drag-over'); };
-      item.ondragleave = ()=>{ item.classList.remove('drag-over'); };
-      item.ondrop = (e)=>{
+      item.ondragstart = function(){ dragCarrierId = id; };
+      item.ondragover = function(e){ e.preventDefault(); item.classList.add('drag-over'); };
+      item.ondragleave = function(){ item.classList.remove('drag-over'); };
+      item.ondrop = function(e){
         e.preventDefault(); item.classList.remove('drag-over');
         if(!dragCarrierId || dragCarrierId === id) return;
         pushUndo();
@@ -695,10 +786,6 @@ function renderSidebar(){
   });
 }
 
-function escapeHtml(s){
-  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
-
 function renderTable(){
   const carrier = state.carriers[currentCarrierId];
   const table = document.getElementById('noticeTable');
@@ -711,15 +798,17 @@ function renderTable(){
   if(n === 1) colWidths = ['100%'];
   else if(n === 2) colWidths = ['32%','68%'];
   else if(n === 3) colWidths = ['18%','42%','40%'];
-  else colWidths = carrier.columns.map(()=> (100/n).toFixed(1)+'%');
+  else colWidths = carrier.columns.map(function(){ return (100/n).toFixed(1)+'%'; });
 
   let html = '<colgroup>';
-  colWidths.forEach(w=> html += `<col style="width:${w}">`);
+  colWidths.forEach(function(w){ html += '<col style="width:' + w + '">'; });
   if(isEdit()) html += '<col style="width:168px">';
   html += '</colgroup>';
 
   html += '<tr>';
-  carrier.columns.forEach((col, colIdx)=> html += `<th ${isEdit()?`contenteditable="true" onblur="onHeaderEdit(${colIdx}, this)"`:''}>${escapeHtml(col)}</th>`);
+  carrier.columns.forEach(function(col, colIdx){
+    html += '<th ' + (isEdit() ? 'contenteditable="true" onblur="onHeaderEdit(' + colIdx + ', this)"' : '') + '>' + escapeHtml(col) + '</th>';
+  });
   if(isEdit()) html += '<th class="col-actions">관리</th>';
   html += '</tr>';
 
@@ -736,25 +825,27 @@ function renderTable(){
     }
   }
 
-  carrier.rows.forEach((r, idx)=>{
+  carrier.rows.forEach(function(r, idx){
     html += '<tr class="' + (r.hl==='warn'?'hl-warn':r.hl==='danger'?'hl-danger':'') + '" data-idx="' + idx + '">';
-    r.cells.forEach((cellVal, colIdx)=>{
+    r.cells.forEach(function(cellVal, colIdx){
       if(grouped && colIdx===0){
-        if(!spanInfo[idx] || !spanInfo[idx].start) return; // 병합된 셀은 건너뜀
-        html += `<td rowspan="${spanInfo[idx].span}" ${isEdit()?`contenteditable="true" onblur="onGroupCellEdit(${idx}, this)"`:''}>${escapeHtml(cellVal).replace(/\n/g,'<br>')}</td>`;
+        if(!spanInfo[idx] || !spanInfo[idx].start) return;
+        html += '<td rowspan="' + spanInfo[idx].span + '" ' +
+                (isEdit() ? 'contenteditable="true" onblur="onGroupCellEdit(' + idx + ', this)"' : '') + '>' +
+                escapeHtml(cellVal).replace(/\n/g,'<br>') + '</td>';
       } else {
-        html += `<td ${isEdit()?`contenteditable="true" onblur="onCellEdit(${idx}, ${colIdx}, this)"`:''}>${escapeHtml(cellVal).replace(/\n/g,'<br>')}</td>`;
+        html += '<td ' + (isEdit() ? 'contenteditable="true" onblur="onCellEdit(' + idx + ', ' + colIdx + ', this)"' : '') + '>' +
+                escapeHtml(cellVal).replace(/\n/g,'<br>') + '</td>';
       }
     });
     if(isEdit()){
-      html += `<td class="col-actions">
-        <div class="row-actions">
-          <span class="grip-handle" draggable="true" data-row="${idx}" title="드래그해서 순서 변경">⠿</span>
-          <button title="강조 순환: 없음 → 강조(노란배경) → 주의(빨간글씨)" onclick="cycleHighlight(${idx})">${r.hl==='none'?'○':r.hl==='warn'?'🟡':'🔴'}</button>
-          <button title="행 복제" onclick="duplicateRow(${idx})">복제</button>
-          <button title="행 삭제" onclick="deleteRow(${idx})">✕</button>
-        </div>
-      </td>`;
+      html += '<td class="col-actions"><div class="row-actions">' +
+        '<span class="grip-handle" draggable="true" data-row="' + idx + '" title="드래그해서 순서 변경">⠿</span>' +
+        '<button title="강조 순환: 없음 → 강조(노란배경) → 주의(빨간글씨)" onclick="cycleHighlight(' + idx + ')">' +
+          (r.hl==='none'?'○':r.hl==='warn'?'🟡':'🔴') + '</button>' +
+        '<button title="행 복제" onclick="duplicateRow(' + idx + ')">복제</button>' +
+        '<button title="행 삭제" onclick="deleteRow(' + idx + ')">✕</button>' +
+      '</div></td>';
     }
     html += '</tr>';
   });
@@ -762,19 +853,18 @@ function renderTable(){
   table.innerHTML = html;
 
   if(isEdit()){
-    let rows = table.querySelectorAll('tr[data-idx]');
-    rows.forEach(tr=>{
+    table.querySelectorAll('tr[data-idx]').forEach(function(tr){
       const grip = tr.querySelector('.grip-handle');
       if(!grip) return;
-      grip.ondragstart = ()=>{ dragRowIndex = parseInt(grip.dataset.row); };
-      tr.ondragover = (e)=> e.preventDefault();
-      tr.ondrop = (e)=>{
+      grip.ondragstart = function(){ dragRowIndex = parseInt(grip.dataset.row); };
+      tr.ondragover = function(e){ e.preventDefault(); };
+      tr.ondrop = function(e){
         e.preventDefault();
         const toIdx = parseInt(tr.dataset.idx);
         if(dragRowIndex === null || dragRowIndex === toIdx) return;
         pushUndo();
         const rows = carrier.rows;
-        const [moved] = rows.splice(dragRowIndex,1);
+        const moved = rows.splice(dragRowIndex,1)[0];
         rows.splice(toIdx,0,moved);
         touch(currentCarrierId);
         renderTable();
@@ -782,17 +872,17 @@ function renderTable(){
     });
   }
 
-  // 공지 영역 (표 아래, 전체 너비. 문단(빈 줄) 구분 유지)
+  // 공지 영역 (표 아래, 전체 너비. 빈 줄로 문단 구분)
   if(carrier.note && carrier.note.type !== 'none' && carrier.note.body){
-    const paragraphs = carrier.note.body.split(/\n\s*\n/).map(p=>
-      '<p>' + escapeHtml(p).replace(/\n/g,'<br>') + '</p>'
-    ).join('');
+    const paragraphs = carrier.note.body.split(/\n\s*\n/).map(function(p){
+      return '<p>' + escapeHtml(p).replace(/\n/g,'<br>') + '</p>';
+    }).join('');
     const icon = carrier.note.type === 'danger' ? '⚠ ' : '';
-    noteBox.innerHTML = `
-      <div class="note-box ${carrier.note.type}">
-        <div class="note-title">${icon}${escapeHtml(carrier.note.title || '주의사항')}</div>
-        <div class="note-body">${paragraphs}</div>
-      </div>`;
+    noteBox.innerHTML =
+      '<div class="note-box ' + carrier.note.type + '">' +
+        '<div class="note-title">' + icon + escapeHtml(carrier.note.title || '주의사항') + '</div>' +
+        '<div class="note-body">' + paragraphs + '</div>' +
+      '</div>';
   } else {
     noteBox.innerHTML = '';
   }
@@ -828,7 +918,6 @@ function onGroupCellEdit(rowIdx, el){
   const oldVal = carrier.rows[rowIdx].cells[0];
   if(oldVal === newVal) return;
   pushUndo();
-  // 같은 그룹(연속된 동일값) 전체에 반영
   let j = rowIdx;
   while(j < carrier.rows.length && carrier.rows[j].cells[0] === oldVal){
     carrier.rows[j].cells[0] = newVal;
@@ -851,8 +940,7 @@ function cycleHighlight(rowIdx){
 function duplicateRow(rowIdx){
   pushUndo();
   const carrier = state.carriers[currentCarrierId];
-  const copy = deepClone(carrier.rows[rowIdx]);
-  carrier.rows.splice(rowIdx+1, 0, copy);
+  carrier.rows.splice(rowIdx+1, 0, deepClone(carrier.rows[rowIdx]));
   touch(currentCarrierId);
   renderTable();
 }
@@ -860,8 +948,7 @@ function duplicateRow(rowIdx){
 function deleteRow(rowIdx){
   if(!confirm('이 행을 삭제할까요?')) return;
   pushUndo();
-  const carrier = state.carriers[currentCarrierId];
-  carrier.rows.splice(rowIdx,1);
+  state.carriers[currentCarrierId].rows.splice(rowIdx,1);
   touch(currentCarrierId);
   renderTable();
 }
@@ -871,36 +958,29 @@ function deleteRow(rowIdx){
    ========================================================= */
 function openAddRowModal(){
   const carrier = state.carriers[currentCarrierId];
-  const root = document.getElementById('modalRoot');
-  let fieldsHtml = carrier.columns.map((col,i)=>`
-    <div class="modal-row">
-      <label>${escapeHtml(col)}</label>
-      <input type="text" id="addField${i}">
-    </div>`).join('');
-  root.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>행 추가 — ${escapeHtml(carrier.name)}</h2>
-        ${fieldsHtml}
-        <div class="modal-row">
-          <label>강조</label>
-          <select id="addHl">
-            <option value="none">없음</option>
-            <option value="warn">강조 (노란 배경)</option>
-            <option value="danger">주의 (빨간 텍스트)</option>
-          </select>
-        </div>
-        <div class="modal-actions">
-          <button onclick="closeModal()">취소</button>
-          <button class="primary" onclick="submitAddRow()">추가</button>
-        </div>
-      </div>
-    </div>`;
+  const fieldsHtml = carrier.columns.map(function(col,i){
+    return '<div class="modal-row"><label>' + escapeHtml(col) + '</label><input type="text" id="addField' + i + '"></div>';
+  }).join('');
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this) closeModal()">' +
+      '<div class="modal">' +
+        '<h2>행 추가 — ' + escapeHtml(carrier.name) + '</h2>' + fieldsHtml +
+        '<div class="modal-row"><label>강조</label><select id="addHl">' +
+          '<option value="none">없음</option>' +
+          '<option value="warn">강조 (노란 배경)</option>' +
+          '<option value="danger">주의 (빨간 텍스트)</option>' +
+        '</select></div>' +
+        '<div class="modal-actions">' +
+          '<button onclick="closeModal()">취소</button>' +
+          '<button class="primary" onclick="submitAddRow()">추가</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 function submitAddRow(){
   const carrier = state.carriers[currentCarrierId];
-  const cells = carrier.columns.map((_,i)=> document.getElementById('addField'+i).value);
+  const cells = carrier.columns.map(function(_,i){ return document.getElementById('addField'+i).value; });
   const hl = document.getElementById('addHl').value;
   pushUndo();
   carrier.rows.push(row(cells, hl));
@@ -913,48 +993,26 @@ function submitAddRow(){
    모달: + 열추가
    ========================================================= */
 function openColumnModal(){
-  const carrier = state.carriers[currentCarrierId];
-  const root = document.getElementById('modalRoot');
-  renderColumnModalBody(carrier);
-}
-
-function renderColumnModalBody(carrier){
-  const root = document.getElementById('modalRoot');
-  let rowsHtml = carrier.columns.map((col,i)=>`
-    <div class="field-list-row">
-      <input type="text" value="${escapeHtml(col)}" data-colidx="${i}">
-      <button class="small" onclick="removeColumn(${i})">삭제</button>
-    </div>`).join('');
-  root.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>+ 열추가 — ${escapeHtml(carrier.name)}</h2>
-        <div class="hint">열이 3개 이상이면 첫 번째 열 기준으로 자동 그룹핑됩니다.</div>
-        <div style="margin-top:10px;">${rowsHtml}</div>
-        <button class="small" onclick="addColumn()">+ 열 추가</button>
-        <div class="modal-actions">
-          <button onclick="closeModal()">취소</button>
-          <button class="primary" onclick="submitColumnEdit()">저장</button>
-        </div>
-      </div>
-    </div>`;
+  // 이전에 모달을 그냥 닫았을 때 남아 있던 임시값을 반드시 버린다 (오염 방지)
+  window.__tempColumns = null;
+  window.__tempRows = null;
+  saveColumnInputsToTemp();
+  renderTempColumnModal(state.carriers[currentCarrierId]);
 }
 
 function addColumn(){
-  const carrier = state.carriers[currentCarrierId];
   saveColumnInputsToTemp();
   window.__tempColumns.push('새 열');
-  window.__tempRows.forEach(r=> r.cells.push(''));
-  renderTempColumnModal(carrier);
+  window.__tempRows.forEach(function(r){ r.cells.push(''); });
+  renderTempColumnModal(state.carriers[currentCarrierId]);
 }
 
 function removeColumn(i){
-  const carrier = state.carriers[currentCarrierId];
   saveColumnInputsToTemp();
   if(window.__tempColumns.length <= 1){ alert('최소 1개의 열이 필요합니다.'); return; }
   window.__tempColumns.splice(i,1);
-  window.__tempRows.forEach(r=> r.cells.splice(i,1));
-  renderTempColumnModal(carrier);
+  window.__tempRows.forEach(function(r){ r.cells.splice(i,1); });
+  renderTempColumnModal(state.carriers[currentCarrierId]);
 }
 
 function saveColumnInputsToTemp(){
@@ -963,35 +1021,35 @@ function saveColumnInputsToTemp(){
     window.__tempColumns = deepClone(carrier.columns);
     window.__tempRows = deepClone(carrier.rows);
   }
-  document.querySelectorAll('[data-colidx]').forEach(inp=>{
+  document.querySelectorAll('[data-colidx]').forEach(function(inp){
     window.__tempColumns[parseInt(inp.dataset.colidx)] = inp.value;
   });
 }
 
 function renderTempColumnModal(carrier){
-  const root = document.getElementById('modalRoot');
-  let rowsHtml = window.__tempColumns.map((col,i)=>`
-    <div class="field-list-row">
-      <input type="text" value="${escapeHtml(col)}" data-colidx="${i}">
-      <button class="small" onclick="removeColumn(${i})">삭제</button>
-    </div>`).join('');
-  root.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>+ 열추가 — ${escapeHtml(carrier.name)}</h2>
-        <div class="hint">열이 3개 이상이면 첫 번째 열 기준으로 자동 그룹핑됩니다. 값 입력은 저장 후 표에서 셀을 클릭해서 하면 됩니다.</div>
-        <div style="margin-top:10px;">${rowsHtml}</div>
-        <button class="small" onclick="addColumn()">+ 열 추가</button>
-        <div class="modal-actions">
-          <button onclick="cancelColumnEdit()">취소</button>
-          <button class="primary" onclick="submitColumnEdit()">저장</button>
-        </div>
-      </div>
-    </div>`;
+  const rowsHtml = window.__tempColumns.map(function(col,i){
+    return '<div class="field-list-row">' +
+      '<input type="text" value="' + escapeHtml(col) + '" data-colidx="' + i + '">' +
+      '<button class="small" onclick="removeColumn(' + i + ')">삭제</button></div>';
+  }).join('');
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this) cancelColumnEdit()">' +
+      '<div class="modal">' +
+        '<h2>+ 열추가 — ' + escapeHtml(carrier.name) + '</h2>' +
+        '<div class="hint">열이 3개 이상이면 첫 번째 열 기준으로 자동 그룹핑됩니다. 값 입력은 저장 후 표에서 셀을 클릭해서 하면 됩니다.</div>' +
+        '<div style="margin-top:10px;">' + rowsHtml + '</div>' +
+        '<button class="small" onclick="addColumn()">+ 열 추가</button>' +
+        '<div class="modal-actions">' +
+          '<button onclick="cancelColumnEdit()">취소</button>' +
+          '<button class="primary" onclick="submitColumnEdit()">저장</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 function cancelColumnEdit(){
-  window.__tempColumns = null; window.__tempRows = null;
+  window.__tempColumns = null;
+  window.__tempRows = null;
   closeModal();
 }
 
@@ -1001,7 +1059,8 @@ function submitColumnEdit(){
   pushUndo();
   carrier.columns = window.__tempColumns;
   carrier.rows = window.__tempRows;
-  window.__tempColumns = null; window.__tempRows = null;
+  window.__tempColumns = null;
+  window.__tempRows = null;
   touch(currentCarrierId);
   closeModal();
   renderTable();
@@ -1013,33 +1072,24 @@ function submitColumnEdit(){
 function openNoteModal(){
   const carrier = state.carriers[currentCarrierId];
   const n = carrier.note || {type:'none',title:'',body:''};
-  const root = document.getElementById('modalRoot');
-  root.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>주의사항 편집 — ${escapeHtml(carrier.name)}</h2>
-        <div class="modal-row">
-          <label>유형</label>
-          <select id="noteType">
-            <option value="none" ${n.type==='none'?'selected':''}>없음</option>
-            <option value="warn" ${n.type==='warn'?'selected':''}>주의 (노란 배경)</option>
-            <option value="danger" ${n.type==='danger'?'selected':''}>위험 (빨간 배경)</option>
-          </select>
-        </div>
-        <div class="modal-row">
-          <label>제목</label>
-          <input type="text" id="noteTitle" value="${escapeHtml(n.title)}">
-        </div>
-        <div class="modal-row">
-          <label>내용 (빈 줄로 문단 구분)</label>
-          <textarea id="noteBody" rows="10">${escapeHtml(n.body)}</textarea>
-        </div>
-        <div class="modal-actions">
-          <button onclick="closeModal()">취소</button>
-          <button class="primary" onclick="submitNoteEdit()">저장</button>
-        </div>
-      </div>
-    </div>`;
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this) closeModal()">' +
+      '<div class="modal">' +
+        '<h2>주의사항 편집 — ' + escapeHtml(carrier.name) + '</h2>' +
+        '<div class="modal-row"><label>유형</label><select id="noteType">' +
+          '<option value="none" ' + (n.type==='none'?'selected':'') + '>없음</option>' +
+          '<option value="warn" ' + (n.type==='warn'?'selected':'') + '>주의 (노란 배경)</option>' +
+          '<option value="danger" ' + (n.type==='danger'?'selected':'') + '>위험 (빨간 배경)</option>' +
+        '</select></div>' +
+        '<div class="modal-row"><label>제목</label><input type="text" id="noteTitle" value="' + escapeHtml(n.title) + '"></div>' +
+        '<div class="modal-row"><label>내용 (빈 줄로 문단 구분)</label>' +
+        '<textarea id="noteBody" rows="10">' + escapeHtml(n.body) + '</textarea></div>' +
+        '<div class="modal-actions">' +
+          '<button onclick="closeModal()">취소</button>' +
+          '<button class="primary" onclick="submitNoteEdit()">저장</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 function submitNoteEdit(){
@@ -1059,54 +1109,61 @@ function submitNoteEdit(){
    모달: 통신사 관리
    ========================================================= */
 function openCarrierModal(){
-  const root = document.getElementById('modalRoot');
-  let rowsHtml = state.carrierOrder.map((id,i)=>{
+  const rowsHtml = state.carrierOrder.map(function(id){
     const c = state.carriers[id];
-    return `<div class="field-list-row">
-      <input type="text" value="${escapeHtml(c.name)}" data-carrierid="${id}">
-      <button class="small" onclick="deleteCarrier('${id}')">삭제</button>
-    </div>`;
+    return '<div class="field-list-row">' +
+      '<input type="text" value="' + escapeHtml(c.name) + '" data-carrierid="' + escapeHtml(id) + '">' +
+      '<button class="small" onclick="removeCarrier(\'' + escapeHtml(id) + '\')">삭제</button></div>';
   }).join('');
-  root.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>통신사 관리</h2>
-        <div class="hint">순서 변경은 사이드바에서 드래그로 가능합니다.</div>
-        <div style="margin-top:10px;">${rowsHtml}</div>
-        <button class="small" onclick="addCarrier()">+ 통신사 추가</button>
-        <div class="modal-actions">
-          <button onclick="closeModal()">취소</button>
-          <button class="primary" onclick="submitCarrierEdit()">저장</button>
-        </div>
-      </div>
-    </div>`;
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this) closeModal()">' +
+      '<div class="modal">' +
+        '<h2>통신사 관리</h2>' +
+        '<div class="hint">순서 변경은 사이드바에서 드래그로 가능합니다.</div>' +
+        '<div style="margin-top:10px;">' + rowsHtml + '</div>' +
+        '<button class="small" onclick="addCarrier()">+ 통신사 추가</button>' +
+        '<div class="modal-actions">' +
+          '<button onclick="closeModal()">취소</button>' +
+          '<button class="primary" onclick="submitCarrierEdit()">저장</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 function addCarrier(){
   pushUndo();
   const id = 'carrier_' + Date.now();
-  state.carriers[id] = { name:'새 통신사', columns:['유형','상부점'], rows:[], note:{type:'none',title:'',body:''}, updatedAt: new Date().toISOString() };
+  state.carriers[id] = {
+    name:'새 통신사', columns:['유형','상부점'], rows:[],
+    note:{type:'none',title:'',body:''},
+    updatedAt: new Date().toISOString(), version: null
+  };
   state.carrierOrder.push(id);
-  touch();
+  touch(id);
   openCarrierModal();
 }
 
-function deleteCarrier(id){
+function removeCarrier(id){
   if(state.carrierOrder.length <= 1){ alert('최소 1개의 통신사가 필요합니다.'); return; }
-  if(!confirm('이 통신사와 데이터를 모두 삭제할까요?')) return;
+  if(!confirm('이 통신사와 데이터를 모두 삭제할까요?\n(수정 이력에는 남아서 되돌릴 수 있습니다)')) return;
   pushUndo();
   delete state.carriers[id];
-  state.carrierOrder = state.carrierOrder.filter(x=>x!==id);
-  if(currentCarrierId === id) currentCarrierId = state.carrierOrder[0];
+  state.carrierOrder = state.carrierOrder.filter(function(x){ return x !== id; });
+  dirtyCarriers.delete(id);
+  deletedCarriers.add(id);
+  if(currentCarrierId === id) currentCarrierId = state.carrierOrder[0] || null;
   touch();
   openCarrierModal();
 }
 
 function submitCarrierEdit(){
   pushUndo();
-  document.querySelectorAll('[data-carrierid]').forEach(inp=>{
+  document.querySelectorAll('[data-carrierid]').forEach(function(inp){
     const id = inp.dataset.carrierid;
-    if(state.carriers[id]) state.carriers[id].name = inp.value;
+    if(state.carriers[id] && state.carriers[id].name !== inp.value){
+      state.carriers[id].name = inp.value;
+      dirtyCarriers.add(id);
+    }
   });
   touch();
   closeModal();
@@ -1117,53 +1174,101 @@ function submitCarrierEdit(){
    모달: 비밀번호 변경 (관리자 전용)
    ========================================================= */
 function openChangePwModal(){
-  const root = document.getElementById('modalRoot');
-  root.innerHTML = `
-    <div class="modal-overlay" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>비밀번호 변경</h2>
-        <div class="modal-row">
-          <label>대상</label>
-          <select id="pwRole">
-            <option value="edit">정책 담당자 비밀번호</option>
-            <option value="super">관리자 비밀번호</option>
-          </select>
-        </div>
-        <div class="modal-row">
-          <label>새 비밀번호</label>
-          <input type="password" id="newPw">
-        </div>
-        <div class="modal-actions">
-          <button onclick="closeModal()">취소</button>
-          <button class="primary" onclick="submitChangePw()">변경</button>
-        </div>
-      </div>
-    </div>`;
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this) closeModal()">' +
+      '<div class="modal">' +
+        '<h2>비밀번호 변경</h2>' +
+        '<div class="modal-row"><label>대상</label><select id="pwRole">' +
+          '<option value="edit">정책 담당자 비밀번호</option>' +
+          '<option value="super">관리자 비밀번호</option>' +
+        '</select></div>' +
+        '<div class="modal-row"><label>새 비밀번호 (4자 이상)</label><input type="password" id="newPw"></div>' +
+        '<div class="modal-actions">' +
+          '<button onclick="closeModal()">취소</button>' +
+          '<button class="primary" onclick="submitChangePw()">변경</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
 }
 
 async function submitChangePw(){
   const role = document.getElementById('pwRole').value;
   const newPw = document.getElementById('newPw').value;
   if(!newPw){ alert('새 비밀번호를 입력해주세요.'); return; }
-  if(!SHEET_URL){ alert('구글시트 연동 전에는 비밀번호 변경이 반영되지 않습니다. 배포 후 이용해주세요.'); return; }
-  try{
-    const res = await fetch(SHEET_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({ action:'changePassword', token: session.token, role, newPassword: newPw })
-    });
-    const data = await res.json();
-    if(data.ok){ alert('비밀번호가 변경되었습니다.'); closeModal(); }
-    else alert(data.error || '변경에 실패했습니다.');
-  } catch(err){
-    alert('요청 중 오류가 발생했습니다.');
+  const r = await rpc('reception_change_password', { p_token: session.token, p_role: role, p_new: newPw });
+  if(!r.ok){ alert('요청 실패 (' + r.code + ')\n' + r.detail); return; }
+  const d = r.data || {};
+  if(!d.ok){ alert(d.error || '변경에 실패했습니다.'); return; }
+  alert('비밀번호가 변경되었습니다.');
+  if(role === 'super') isDefaultPassword = false;
+  if(role === 'edit' && session.role === 'edit') isDefaultPassword = false;
+  closeModal();
+  renderPwNotice();
+}
+
+/* =========================================================
+   모달: 수정 이력 / 되돌리기
+   ========================================================= */
+async function openHistoryModal(){
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay"><div class="modal wide"><h2>수정 이력</h2><div>불러오는 중…</div></div></div>';
+  const r = await rpc('reception_history_list', { p_limit: 50 });
+  if(!r.ok){
+    document.getElementById('modalRoot').innerHTML =
+      '<div class="modal-overlay" onclick="if(event.target===this) closeModal()"><div class="modal wide">' +
+      '<h2>수정 이력</h2><div class="ab-detail">불러오기 실패 (' + escapeHtml(r.code) + ') ' + escapeHtml(r.detail) + '</div>' +
+      '<div class="modal-actions"><button onclick="closeModal()">닫기</button></div></div></div>';
+    return;
   }
+  const list = Array.isArray(r.data) ? r.data : [];
+  const actionLabel = { insert:'추가', update:'수정', delete:'삭제', restore:'되돌림', import:'전체교체' };
+  const rowsHtml = list.length === 0
+    ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">아직 이력이 없습니다.</td></tr>'
+    : list.map(function(h){
+        return '<tr>' +
+          '<td>' + dateTimeLabel(h.changedAt) + '</td>' +
+          '<td>' + escapeHtml(h.carrierName || h.carrierId) + '</td>' +
+          '<td><span class="badge">' + (actionLabel[h.action] || escapeHtml(h.action)) + '</span></td>' +
+          '<td>' + (h.changedBy === 'super' ? '관리자' : h.changedBy === 'edit' ? '담당자' : escapeHtml(h.changedBy||'-')) + '</td>' +
+          '<td>' + (h.hasSnapshot
+            ? '<button class="small" onclick="doRestore(' + h.id + ')">이 시점으로 되돌리기 (' + h.rowCount + '행)</button>'
+            : '<span class="hint">되돌릴 내용 없음</span>') + '</td>' +
+        '</tr>';
+      }).join('');
+  document.getElementById('modalRoot').innerHTML =
+    '<div class="modal-overlay" onclick="if(event.target===this) closeModal()">' +
+      '<div class="modal wide">' +
+        '<h2>수정 이력 (최근 50건)</h2>' +
+        '<div class="hint">"되돌리기"는 그 이력에 기록된 <b>수정 직전 내용</b>으로 해당 통신사를 복원합니다. 현재 내용도 이력에 남습니다.</div>' +
+        '<table class="hist" style="margin-top:10px;">' +
+          '<tr><th>시각</th><th>통신사</th><th>동작</th><th>수정자</th><th>되돌리기</th></tr>' +
+          rowsHtml +
+        '</table>' +
+        '<div class="modal-actions"><button onclick="closeModal()">닫기</button></div>' +
+      '</div>' +
+    '</div>';
+}
+
+async function doRestore(historyId){
+  if(hasUnsaved()){ alert('먼저 저장되지 않은 수정을 처리해주세요.'); return; }
+  if(!confirm('이 시점의 내용으로 되돌릴까요?')) return;
+  const r = await rpc('reception_restore', { p_token: session.token, p_history_id: historyId });
+  if(!r.ok){ alert('요청 실패 (' + r.code + ')\n' + r.detail); return; }
+  const d = r.data || {};
+  if(!d.ok){
+    if(d.code === 'NEEDS_AUTH'){ closeModal(); return handleNeedsAuth(); }
+    alert(d.error || '되돌리기에 실패했습니다.');
+    return;
+  }
+  alert('되돌렸습니다. 최신 내용을 다시 불러옵니다.');
+  closeModal();
+  await loadFromDb();
 }
 
 /* =========================================================
    단축키
    ========================================================= */
-document.addEventListener('keydown', (e)=>{
+document.addEventListener('keydown', function(e){
   if(!isEdit()) return;
   if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z' && !e.shiftKey){ e.preventDefault(); undo(); }
   if((e.ctrlKey||e.metaKey) && (e.key.toLowerCase()==='y' || (e.key.toLowerCase()==='z' && e.shiftKey))){ e.preventDefault(); redo(); }
@@ -1172,33 +1277,40 @@ document.addEventListener('keydown', (e)=>{
 /* =========================================================
    저장 안 된 채로 창을 닫는 사고 방지
    ========================================================= */
-
-// 셀에 타이핑을 시작하면 표시해둔다 (아직 blur 전이라 state에 반영되지 않은 상태)
 document.addEventListener('input', function(e){
   if(e.target && e.target.isContentEditable) typing = true;
 });
 
-// 탭을 닫거나 새로고침할 때, 저장이 안 끝났으면 브라우저 경고를 띄운다
 window.addEventListener('beforeunload', function(e){
-  if(!SHEET_URL) return;
-  if(dirty || typing){
+  if(hasUnsaved() || typing){
     e.preventDefault();
-    e.returnValue = '';   // 크롬 계열은 브라우저 기본 문구를 표시
+    e.returnValue = '';
     return '';
   }
 });
 
-// 탭을 숨기거나 닫는 시점에 마지막으로 한 번 확실히 저장한다.
-//  - 편집 중이던 셀을 강제로 blur 시켜 값을 state에 확정시키고
-//  - 0.7초 디바운스를 기다리지 않고 즉시 전송한다 (keepalive)
+/* 탭이 숨겨지거나 닫히는 순간:
+   - 편집 중이던 셀을 강제로 blur 해서 값을 확정시키고
+   - 디바운스를 기다리지 않고 keepalive 요청으로 즉시 전송한다 */
 function flushSave(){
-  if(!SHEET_URL || !loadOk) return;
+  if(!loadOk || !session.token) return;
   const ae = document.activeElement;
-  if(ae && ae.isContentEditable) ae.blur();   // → onCellEdit 등이 실행되어 state 확정
-  if(dirty && session.token){
-    clearTimeout(saveTimer);
-    saveToSheet(0);
-  }
+  if(ae && ae.isContentEditable) ae.blur();
+  if(!hasUnsaved()) return;
+  clearTimeout(saveTimer);
+  // 통신사별로 독립적이므로 병렬 발사해도 서로 영향이 없다
+  Array.from(deletedCarriers).forEach(function(id){
+    rpc('reception_delete_carrier', { p_token: session.token, p_id: id }, { keepalive:true });
+  });
+  Array.from(dirtyCarriers).forEach(function(id){
+    const c = state.carriers[id];
+    if(!c) return;
+    rpc('reception_save_carrier', {
+      p_token: session.token,
+      p_carrier: carrierPayload(id),
+      p_base_version: (typeof c.version === 'number' ? c.version : null)
+    }, { keepalive:true });
+  });
 }
 document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'hidden') flushSave();
@@ -1208,7 +1320,7 @@ window.addEventListener('pagehide', flushSave);
 /* =========================================================
    초기 실행
    ========================================================= */
-loadFromSheet();
+loadFromDb();
 </script>
 </body>
 </html>
