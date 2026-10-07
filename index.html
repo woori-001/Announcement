@@ -9,6 +9,15 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="stylesheet" as="style" crossorigin
       href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<script>
+/* 저장해둔 스킨을 화면 그리기 전에 먼저 적용 (색이 번쩍 바뀌는 걸 막음) */
+(function(){
+  try{
+    var v = localStorage.getItem('reception_skin');
+    if(v && v !== 'aurora') document.documentElement.setAttribute('data-skin', v);
+  }catch(e){}
+})();
+</script>
 <style>
   /* =========================================================
      디자인 토큰 — 강조색을 바꾸려면 --hl 계열 4줄만 바꾸면
@@ -26,13 +35,78 @@
     --line:#EDF1F8; --line-strong:#E6EBF5; --line-head:#DDE4F1;
     --accent:linear-gradient(135deg,#5A63E8 0%,#2E9BC9 100%);
     --accent-solid:#4C63D8;
+    --accent-shadow:rgba(60,100,214,0.30);
     --hl:#3A9D96;                 /* 강조 기준색 */
     --hl-row:rgb(221,238,237);    /* 강조 행 배경 */
     --hl-border:rgb(188,222,219); /* 강조 행 구분선 */
     --hl-soft:rgb(235,245,244);   /* 공지 제목칩 */
+    --hl-text:#1F6B65;            /* 강조 칩 위 글자 */
+    --hl-shadow:rgba(58,157,150,0.18);
+    --head-cell:#F2F5FB;          /* 표 머리글 칸 */
+    --group-cell:#F7F9FD;         /* 표 묶음 칸 */
+    /* 페이지 배경 (스킨마다 바뀜) */
+    --bg1:rgba(124,131,255,0.22); --bg2:rgba(60,201,180,0.18); --bg3:rgba(236,130,196,0.14);
+    --bg-a:#EFF1FC; --bg-b:#EBF3FA; --bg-c:#EAF7F2;
     --danger:#B5341F; --danger-bg:#FCEDE9; --danger-text:#8A2318; --danger-strong:#96281A;
     --radius:22px; --radius-lg:24px;
   }
+
+  /* =========================================================
+     스킨 — 기본값(오로라 글래스)은 위 :root 그대로이고,
+     아래는 바꾸고 싶은 토큰만 덮어씁니다.
+     모니터 프로그램(WooriNoticeMonitor)의 스킨과 같은 색입니다.
+     ========================================================= */
+  html[data-skin="clay"]{
+    --accent:linear-gradient(135deg,#FF8FA8 0%,#FF9E80 100%);
+    --accent-solid:#E8788F; --accent-shadow:rgba(255,143,168,0.34);
+    --hl:#C77BA8; --hl-row:rgb(248,226,238); --hl-border:rgb(238,201,222);
+    --hl-soft:rgb(251,233,243); --hl-text:#8E3F6D; --hl-shadow:rgba(199,123,168,0.20);
+    --head-cell:#F6F1FB; --group-cell:#FBF8FD;
+    --line:#F2EDF8; --line-strong:#EBE4F4; --line-head:#E2DBF0;
+    --bg1:rgba(255,143,168,0.20); --bg2:rgba(123,108,246,0.14); --bg3:rgba(255,158,128,0.15);
+    --bg-a:#FBF8FF; --bg-b:#FFF4F7; --bg-c:#FFF6F1;
+  }
+  html[data-skin="studio"]{
+    --accent:linear-gradient(135deg,#5143D8 0%,#7A4FD1 100%);
+    --accent-solid:#5143D8; --accent-shadow:rgba(81,67,216,0.30);
+    --hl:#2E9E8F; --hl-row:rgb(219,239,235); --hl-border:rgb(184,219,212);
+    --hl-soft:rgb(234,246,243); --hl-text:#1E6F63; --hl-shadow:rgba(46,158,143,0.18);
+    --head-cell:#F2EFFB; --group-cell:#F9F7FD;
+    --line:#EFECF8; --line-strong:#E6E1F3; --line-head:#DBD4EE;
+    --bg1:rgba(81,67,216,0.16); --bg2:rgba(122,79,209,0.15); --bg3:rgba(140,120,255,0.10);
+    --bg-a:#F6F6FB; --bg-b:#F2EFFC; --bg-c:#F4F2FD;
+  }
+  html[data-skin="rose"]{
+    --accent:linear-gradient(135deg,#FF8FC0 0%,#E8508F 100%);
+    --accent-solid:#E8508F; --accent-shadow:rgba(232,80,143,0.30);
+    --hl:#6D5BC7; --hl-row:rgb(236,232,251); --hl-border:rgb(213,205,243);
+    --hl-soft:rgb(243,240,253); --hl-text:#4B3C9E; --hl-shadow:rgba(109,91,199,0.18);
+    --head-cell:#FCEAF3; --group-cell:#FEF6FA;
+    --line:#F8EBF2; --line-strong:#F3DFE9; --line-head:#EDD2E0;
+    --bg1:rgba(255,146,190,0.22); --bg2:rgba(255,198,222,0.24); --bg3:rgba(232,80,143,0.10);
+    --bg-a:#FFF5FA; --bg-b:#FFF0F7; --bg-c:#FDF4FB;
+  }
+
+  /* ---------- 스킨 고르기 ---------- */
+  .skinwrap{position:relative;}
+  .skinbtn{display:flex; align-items:center; gap:7px; padding:7px 12px; font-size:12.5px;}
+  .skinbtn .sw{width:15px; height:15px; border-radius:50%; background:var(--accent);
+    border:1px solid rgba(255,255,255,0.85); box-shadow:0 1px 3px rgba(20,28,51,0.22);}
+  .skinpop{
+    position:absolute; top:calc(100% + 8px); right:0; z-index:60; width:216px; padding:7px;
+    background:rgba(255,255,255,0.92); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,0.95); border-radius:16px; box-shadow:0 18px 44px rgba(20,28,51,0.20);
+  }
+  .skinpop .ttl{font-size:11px; font-weight:700; letter-spacing:1px; color:var(--text-3); padding:6px 9px 7px;}
+  .skinopt{display:flex; align-items:center; gap:10px; width:100%; padding:8px 9px; border:0;
+    background:transparent; border-radius:11px; font-size:13px; color:var(--text); text-align:left;}
+  .skinopt:hover{background:rgba(120,135,190,0.12);}
+  .skinopt .chip{width:34px; height:19px; border-radius:7px; flex:0 0 auto;
+    border:1px solid rgba(20,28,51,0.10); box-shadow:inset 0 1px 2px rgba(255,255,255,0.6);}
+  .skinopt .nm{flex:1 1 auto;}
+  .skinopt .tick{color:var(--accent-solid); font-weight:800; opacity:0;}
+  .skinopt.on .nm{font-weight:700;}
+  .skinopt.on .tick{opacity:1;}
   *{box-sizing:border-box;}
   body{
     margin:0;
@@ -42,10 +116,10 @@
     letter-spacing:-0.01em; word-break:keep-all;
     color:var(--text); font-size:14px; min-height:100vh;
     background:
-      radial-gradient(560px 560px at -60px -140px, rgba(124,131,255,0.22), rgba(124,131,255,0) 70%),
-      radial-gradient(620px 620px at calc(100% + 150px) 420px, rgba(60,201,180,0.18), rgba(60,201,180,0) 70%),
-      radial-gradient(640px 640px at 38% 115%, rgba(236,130,196,0.14), rgba(236,130,196,0) 70%),
-      linear-gradient(135deg,#EFF1FC 0%,#EBF3FA 48%,#EAF7F2 100%);
+      radial-gradient(560px 560px at -60px -140px, var(--bg1), transparent 70%),
+      radial-gradient(620px 620px at calc(100% + 150px) 420px, var(--bg2), transparent 70%),
+      radial-gradient(640px 640px at 38% 115%, var(--bg3), transparent 70%),
+      linear-gradient(135deg,var(--bg-a) 0%,var(--bg-b) 48%,var(--bg-c) 100%);
     background-attachment:fixed;
   }
 
@@ -56,7 +130,7 @@
   }
   button:hover{background:#ffffff;}
   button.primary{background:var(--accent); color:#fff; border-color:transparent; font-weight:700;
-    box-shadow:0 10px 22px rgba(60,100,214,0.30);}
+    box-shadow:0 10px 22px var(--accent-shadow);}
   button.primary:hover{opacity:0.92; background:var(--accent);}
   button.ghost{border-color:transparent; background:transparent;}
   button.small{padding:7px 12px; font-size:12.5px;}
@@ -71,6 +145,7 @@
 
   /* ---------- 헤더 ---------- */
   .topbar{
+    position:relative; z-index:40;   /* 테마 팝업이 아래 카드들에 가리지 않도록 */
     display:flex; flex-wrap:wrap; gap:18px; align-items:center; justify-content:space-between;
     background:var(--glass-head); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
     border:1px solid var(--glass-border); border-radius:var(--radius);
@@ -104,7 +179,7 @@
     border-radius:13px; cursor:pointer; color:#30395C;
   }
   .carrier-item:hover{background:rgba(255,255,255,0.75);}
-  .carrier-item.active{background:var(--accent); box-shadow:0 8px 18px rgba(60,100,214,0.30);}
+  .carrier-item.active{background:var(--accent); box-shadow:0 8px 18px var(--accent-shadow);}
   .carrier-item .grip{cursor:grab; color:var(--text-3); font-size:12px; user-select:none;}
   .carrier-item.active .grip{color:rgba(255,255,255,0.75);}
   .carrier-item .info{flex:1; min-width:0;}
@@ -134,7 +209,7 @@
     border:1px solid var(--line-strong); box-shadow:0 2px 10px rgba(49,60,122,0.05);}
   table.notice{width:100%; min-width:520px; table-layout:fixed; border-collapse:collapse; font-size:13.5px;}
   table.notice th{
-    background:#F2F5FB; color:#2E3757; font-size:13px; font-weight:700; text-align:left;
+    background:var(--head-cell); color:#2E3757; font-size:13px; font-weight:700; text-align:left;
     padding:12px 15px; border-bottom:1px solid var(--line-head); border-right:1px solid var(--line-strong);
   }
   table.notice th:last-child{border-right:none;}
@@ -144,15 +219,15 @@
   }
   table.notice td:last-child{border-right:none; font-weight:700;}
   table.notice tr:last-child td{border-bottom:none;}
-  table.notice td.group{background:#F7F9FD; font-weight:700; color:#2E3757;
+  table.notice td.group{background:var(--group-cell); font-weight:700; color:#2E3757;
     border-right:1px solid var(--line-strong); border-bottom:1px solid var(--line-strong);}
   /* 마지막 그룹의 묶음 칸은 표 맨 아래에 닿으므로 아래 선을 지운다 */
   table.notice td.group-last{border-bottom:none;}
   table.notice tr.hl-warn td{background:var(--hl-row); border-bottom-color:var(--hl-border); border-right-color:var(--hl-border);}
-  table.notice tr.hl-warn td.group{background:#F7F9FD; border-right-color:var(--line-strong); border-bottom-color:var(--line-strong);}
+  table.notice tr.hl-warn td.group{background:var(--group-cell); border-right-color:var(--line-strong); border-bottom-color:var(--line-strong);}
   table.notice tr.hl-danger td{background:var(--danger-bg); color:var(--danger-text); font-weight:700;
     border-bottom-color:#F3D9D2; border-right-color:#F3D9D2;}
-  table.notice tr.hl-danger td.group{background:#F7F9FD; color:#2E3757; border-right-color:var(--line-strong); border-bottom-color:var(--line-strong);}
+  table.notice tr.hl-danger td.group{background:var(--group-cell); color:#2E3757; border-right-color:var(--line-strong); border-bottom-color:var(--line-strong);}
   td[contenteditable=true]:focus, th[contenteditable=true]:focus{background:#EEF4FF; outline:none;}
 
   .table-head{display:flex; flex-wrap:wrap; gap:12px; align-items:center;
@@ -193,12 +268,12 @@
     background:var(--danger-bg); border:1px solid #F0C3B9; border-radius:var(--radius);
     padding:16px 20px; margin-bottom:18px; box-shadow:0 12px 30px rgba(181,52,31,0.16);
   }
-  #alertBanner.soft{background:var(--hl-soft); border-color:var(--hl-border); box-shadow:0 12px 30px rgba(58,157,150,0.18);}
+  #alertBanner.soft{background:var(--hl-soft); border-color:var(--hl-border); box-shadow:0 12px 30px var(--hl-shadow);}
   #alertBanner .ab-title{font-size:15px; font-weight:800; color:var(--danger-strong); margin-bottom:6px;}
-  #alertBanner.soft .ab-title{color:#1F6B65;}
+  #alertBanner.soft .ab-title{color:var(--hl-text);}
   #alertBanner .ab-body{font-size:13.5px; line-height:1.7; color:var(--text);}
   #alertBanner .ab-body b{color:var(--danger-strong);}
-  #alertBanner.soft .ab-body b{color:#1F6B65;}
+  #alertBanner.soft .ab-body b{color:var(--hl-text);}
   #alertBanner .ab-detail{
     margin-top:8px; font-size:11.5px; color:var(--text-2);
     font-family:ui-monospace,Consolas,'D2Coding',monospace;
@@ -228,11 +303,11 @@
 
   /* ---------- 수정 이력 ---------- */
   table.hist{width:100%; border-collapse:collapse; font-size:12.5px;}
-  table.hist th{text-align:left; background:#F2F5FB; padding:9px 10px;
+  table.hist th{text-align:left; background:var(--head-cell); padding:9px 10px;
     border-bottom:1px solid var(--line-head); font-weight:700; color:#2E3757;}
   table.hist td{padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:middle;}
   .badge{display:inline-block; font-size:11px; padding:3px 9px; border-radius:999px;
-    background:var(--hl-soft); color:#1F6B65; font-weight:700;}
+    background:var(--hl-soft); color:var(--hl-text); font-weight:700;}
 
   .hidden{display:none !important;}
   .hint{font-size:11.5px; color:var(--text-3);}
@@ -253,7 +328,14 @@
     </div>
     <div class="toolbar">
       <div class="left" id="toolbarLeft"></div>
-      <div class="right"><span class="save-status" id="saveStatus"></span></div>
+      <div class="right">
+        <span class="save-status" id="saveStatus"></span>
+        <span class="skinwrap">
+          <button class="small skinbtn" id="skinBtn" aria-haspopup="true" aria-expanded="false"
+                  onclick="toggleSkinPop(event)"><span class="sw"></span>테마</button>
+          <div class="skinpop hidden" id="skinPop"></div>
+        </span>
+      </div>
     </div>
   </div>
 
@@ -1470,6 +1552,72 @@ document.addEventListener('visibilitychange', function(){
   if(document.visibilityState === 'hidden') flushSave();
 });
 window.addEventListener('pagehide', flushSave);
+
+/* =========================================================
+   스킨 (테마) — 브라우저마다 따로 저장됩니다
+   ========================================================= */
+const SKINS = [
+  { id:'aurora', name:'오로라 글래스', chip:'linear-gradient(135deg,#5A63E8,#2E9BC9)' },
+  { id:'clay',   name:'소프트 클레이', chip:'linear-gradient(135deg,#FF8FA8,#FF9E80)' },
+  { id:'studio', name:'스튜디오 바이올렛', chip:'linear-gradient(135deg,#5143D8,#7A4FD1)' },
+  { id:'rose',   name:'체리 블라썸', chip:'linear-gradient(135deg,#FFC6DE,#E8508F)' }
+];
+
+function currentSkin(){
+  const v = document.documentElement.getAttribute('data-skin');
+  return SKINS.some(s => s.id === v) ? v : 'aurora';
+}
+
+function applySkin(id){
+  if(!SKINS.some(s => s.id === id)) id = 'aurora';
+  if(id === 'aurora') document.documentElement.removeAttribute('data-skin');
+  else document.documentElement.setAttribute('data-skin', id);
+  try{ localStorage.setItem('reception_skin', id); }catch(e){}
+  renderSkinPop();
+}
+
+function renderSkinPop(){
+  const pop = document.getElementById('skinPop');
+  if(!pop) return;
+  const cur = currentSkin();
+  pop.innerHTML = '<div class="ttl">테마</div>' + SKINS.map(function(s){
+    return '<button class="skinopt' + (s.id === cur ? ' on' : '') + '" onclick="pickSkin(\'' + s.id + '\')">' +
+             '<span class="chip" style="background:' + s.chip + '"></span>' +
+             '<span class="nm">' + escapeHtml(s.name) + '</span>' +
+             '<span class="tick">✓</span>' +
+           '</button>';
+  }).join('');
+}
+
+function pickSkin(id){ applySkin(id); closeSkinPop(); }
+
+function toggleSkinPop(ev){
+  if(ev) ev.stopPropagation();
+  const pop = document.getElementById('skinPop');
+  if(!pop) return;
+  if(pop.classList.contains('hidden')){ renderSkinPop(); pop.classList.remove('hidden'); }
+  else pop.classList.add('hidden');
+  const btn = document.getElementById('skinBtn');
+  if(btn) btn.setAttribute('aria-expanded', pop.classList.contains('hidden') ? 'false' : 'true');
+}
+
+function closeSkinPop(){
+  const pop = document.getElementById('skinPop');
+  if(pop) pop.classList.add('hidden');
+  const btn = document.getElementById('skinBtn');
+  if(btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+document.addEventListener('click', function(e){
+  const pop = document.getElementById('skinPop');
+  if(!pop || pop.classList.contains('hidden')) return;
+  if(!e.target.closest('.skinwrap')) closeSkinPop();
+});
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape') closeSkinPop();
+});
+
+renderSkinPop();
 
 /* =========================================================
    초기 실행
